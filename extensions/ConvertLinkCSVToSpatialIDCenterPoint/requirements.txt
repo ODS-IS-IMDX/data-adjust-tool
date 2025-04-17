@@ -1,0 +1,13 @@
+geopandas==1.0.1
+pandas==2.2.1
+pyproj==3.6.1
+numpy==1.26.4
+scipy==1.13.0
+numba==0.59.1
+Fiona==1.9.6
+Rtree==1.2.0
+shapely==2.0.4
+pygltflib==1.16.2
+tripy==1.0.0
+tky2jgd==0.1.0
+python/api/nifiapi/NifiLocalPackages/GDAL-3.10.1-cp311-cp311-win_amd64.whl

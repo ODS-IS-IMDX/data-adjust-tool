@@ -1,0 +1,4 @@
+geopandas==1.0.1
+mojimoji==0.0.13
+pygltflib==1.16.2
+pillow==10.4.0

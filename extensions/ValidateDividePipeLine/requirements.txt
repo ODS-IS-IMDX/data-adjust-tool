@@ -1,0 +1,2 @@
+geopandas==1.0.1
+pygltflib==1.16.2

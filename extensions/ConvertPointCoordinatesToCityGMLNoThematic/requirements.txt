@@ -1,0 +1,9 @@
+fiona==1.9.6
+pyproj==3.6.1
+Rtree==1.2.0
+shapely==2.0.4
+geopandas==1.0.1
+mojimoji==0.0.13
+pygltflib==1.16.2
+numpy==1.26.4
+pandas==2.2.1

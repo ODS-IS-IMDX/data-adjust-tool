@@ -1,0 +1,7 @@
+geopandas==1.0.1
+pygltflib==1.16.2
+pillow==10.4.0
+scipy==1.13.0
+shapely==2.0.4
+numba==0.59.1
+tripy==1.0.0

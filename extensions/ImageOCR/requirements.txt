@@ -1,0 +1,15 @@
+pandas==2.2.1
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+pillow==10.4.0
+
+easyocr==1.7.2
+pytesseract==0.3.13
+
+# When performing inference on the CPU (EasyOCR)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+
+# Please enable the following if you are performing inference on a GPU (EasyOCR)
+# --extra-index-url https://download.pytorch.org/whl/cu121
+# torch==2.5.1+cu121
