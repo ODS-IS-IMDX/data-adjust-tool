@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,7 @@
 # SOFTWARE.
 
 import pickle
-from importlib import import_module
-
-np = import_module("numpy")
-
+import numpy as np
 from common.error_code_list import ErrorCodeList
 from cad.common.cad_base_validate_processor import CadBaseValidateProcessor
 
@@ -34,7 +31,7 @@ class ValidateTransformPixelsToLineStrings(CadBaseValidateProcessor):
         implements = ['org.apache.nifi.python.processor.FlowFileTransform']
 
     class ProcessorDetails:
-        version = '1.0.0'
+        version = "1.0.0"
         description = '''プロセッサー「TransformPixelsToLineStrings」の入力データのチェックを行う'''
         tags = ['geodataframe', 'geopandas', 'python', 'validate']
 

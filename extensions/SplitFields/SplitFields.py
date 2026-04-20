@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -79,7 +80,7 @@ DWH名,データ型
     3…文字列型
     4…ブール型
                       ''',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
         required=True
     )
@@ -88,7 +89,7 @@ DWH名,データ型
     FIELDS_DELIMITER = PropertyDescriptor(
         name="Fields Delimiter",
         description="文字列分割時の区切り文字",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
         required=True
     )
@@ -112,7 +113,7 @@ DWH名,データ型
 
         # プロパティで設定した値を取得
         definition_csv = context.getProperty(
-            self.DEFINITION_CSV).evaluateAttributeExpressions(flowfile).getValue()
+            self.DEFINITION_CSV).evaluateAttributeExpressions(flowfile).evaluateAttributeExpressions(flowfile).getValue()
 
         fields_delimiter = context.getProperty(
             self.FIELDS_DELIMITER).evaluateAttributeExpressions(flowfile).getValue()

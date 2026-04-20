@@ -3,14 +3,15 @@
 ## 概要
 本リポジトリでは、Apache NiFiのカスタムプロセッサを実装し、地下インフラ情報のデータ整備を支援するための機能を提供します。本ツールは、インフラ管理DXシステムと連携し、地下埋設物の情報を効率的に処理・統合することを目的としています。
 
-| 機能名                | 機能概要                                                 |
-| --------------------- | -------------------------------------------------------- |
-| 図面から設備抽出      | 図面データを解析し、地下埋設物情報をシェープファイルに変換します。 |
-| CADから設備抽出       | CADデータを解析し、地下埋設物のGISデータを生成します。       |
-| 位置補正ツール        | GISデータに基づき、高精度の位置補正を適用します。          |
-| 3D都市モデル変換      | GISデータを基に、地下埋設物の3D都市モデル（PLATEAU準拠）を生成します。 |
-| 空間ID変換           | 3D都市モデルを空間IDフォーマットへ変換します。             |
-| 画像処理機能         | 図面や画像データを解析し、地下埋設物の情報を抽出します。     |
+| 機能名           | 機能概要                                                               |
+| ---------------- | ---------------------------------------------------------------------- |
+| 図面から設備抽出 | 図面データを解析し、地下埋設物情報をシェープファイルに変換します。     |
+| CADから設備抽出  | CADデータを解析し、地下埋設物のGISデータを生成します。                 |
+| 位置補正ツール   | GISデータに基づき、高精度の位置補正を適用します。                      |
+| 3D都市モデル変換 | GISデータを基に、地下埋設物の3D都市モデル（PLATEAU準拠）を生成します。 |
+| 空間ID変換       | 3D都市モデルを空間IDフォーマットへ変換します。                         |
+| 画像処理機能     | 図面や画像データを解析し、地下埋設物の情報を抽出します。               |
+| 点群オルソ生成   | 3D点群からオルソ画像（ラスタ画像）を生成します。                       |
 
 ## リポジトリ利用方法
 
@@ -37,6 +38,7 @@ docs/02.Setup
 ```
 ├  api         # データ整備ツールの機能群（プロセッサ群）が使用するモジュールを格納しています。
 ├  extensions  # データ整備ツールの機能群（カスタムプロセッサ）が格納されています。
+├  example     # データ整備ツールの機能群を用いたデータフローのサンプルが格納されています。
 └  docs
     ├ 01.setup
     │  └─ データ整備ツールのセットアップガイド
@@ -58,38 +60,49 @@ docs/02.Setup
 
 ## ライセンス
 本リポジトリはMITライセンスで提供されています。
-ソースコードおよび関連ドキュメントの著作権はエヌ・ティ・ティ・インフラネット株式会社に帰属します。
+ソースコードおよび関連ドキュメントの著作権はNTTインフラネット株式会社に帰属します。
+なお一部のソースコードの著作権は、NTTインフラネット株式会社および株式会社NTTデータに帰属します。
 
 ### 依存ライブラリとライセンス
 
 本ツールでは以下の外部ライブラリを使用しています。
 各ライブラリのライセンス詳細は、それぞれの公式リポジトリを参照してください。
 
-| ライブラリ名             | ライセンス              | リポジトリ                                             |
-|-------------------------|------------------------|--------------------------------------------------------|
-| EasyOCR                 | Apache License 2.0     | [GitHub](https://github.com/JaidedAI/EasyOCR)         |
-| ezdxf                   | MIT License            | [GitHub](https://github.com/mozman/ezdxf)             |
-| Fiona                   | BSD 3-Clause License   | [GitHub](https://github.com/Toblerity/Fiona)          |
-| GDAL                    | MIT License            | [GitHub](https://github.com/OSGeo/gdal)               |
-| GeoPandas               | BSD 3-Clause License   | [GitHub](https://github.com/geopandas/geopandas)      |
-| lxml                    | BSD 3-Clause License   | [GitHub](https://github.com/lxml/lxml)                |
-| mojimoji                | Apache License 2.0     | [GitHub](https://github.com/studio-ousia/mojimoji)    |
-| Numba                   | BSD 2-Clause License   | [GitHub](https://github.com/numba/numba)              |
-| NumPy                   | BSD 3-Clause License   | [GitHub](https://github.com/numpy/numpy)              |
-| opencv-python-headless  | MIT License            | [GitHub](https://github.com/opencv/opencv-python)     |
-| pandas                  | BSD 3-Clause License   | [GitHub](https://github.com/pandas-dev/pandas)        |
-| Pillow                  | MIT-CMU License        | [GitHub](https://github.com/python-pillow/Pillow)     |
-| pygltflib               | MIT License            | [GitHub](https://github.com/avaturn/pygltflib)        |
-| pyproj                  | MIT License            | [GitHub](https://github.com/pyproj4/pyproj)           |
-| Python Tesseract        | Apache License 2.0     | [GitHub](https://github.com/madmaze/pytesseract)      |
-| Rasterio                | BSD 3-Clause License   | [GitHub](https://github.com/mapbox/rasterio)          |
-| Rtree                   | MIT License            | [GitHub](https://github.com/Toblerity/rtree)          |
-| scikit-learn            | BSD 3-Clause License   | [GitHub](https://github.com/scikit-learn/scikit-learn)|
-| SciPy                   | BSD 3-Clause License   | [GitHub](https://github.com/scipy/scipy)              |
-| Shapely                 | BSD 3-Clause License   | [GitHub](https://github.com/Toblerity/Shapely)        |
-| TKY2JGD                 | BSD 3-Clause License   | [GitHub](https://github.com/mugwort-rc/TKY2JGD)       |
-| PyTorch                 | BSD 3-Clause License   | [GitHub](https://github.com/pytorch/pytorch)          |
-| tripy                   | MIT License            | [GitHub](https://github.com/linuxlewis/tripy)         |
+| ライブラリ名           | ライセンス                | リポジトリ                                                |
+| ---------------------- | ------------------------- | --------------------------------------------------------- |
+| EasyOCR                | Apache License 2.0        | [GitHub](https://github.com/JaidedAI/EasyOCR)             |
+| ezdxf                  | MIT License               | [GitHub](https://github.com/mozman/ezdxf)                 |
+| GDAL                   | MIT License               | [GitHub](https://github.com/OSGeo/gdal)                   |
+| GeoPandas              | BSD 3-Clause License      | [GitHub](https://github.com/geopandas/geopandas)          |
+| Laspy                  | BSD 2-Clause License      | [GitHub](https://github.com/laspy/laspy)                  |
+| lxml                   | BSD 3-Clause License      | [GitHub](https://github.com/lxml/lxml)                    |
+| mapbox_earcut          | ISC License               | [GitHub](https://github.com/skogler/mapbox_earcut_python) |
+| mojimoji               | Apache License 2.0        | [GitHub](https://github.com/studio-ousia/mojimoji)        |
+| Numba                  | BSD 2-Clause License      | [GitHub](https://github.com/numba/numba)                  |
+| NumPy                  | BSD 3-Clause License      | [GitHub](https://github.com/numpy/numpy)                  |
+| open3d                 | MIT License               | [GitHub](https://github.com/isl-org/Open3D)               |
+| opencv-python-headless | MIT License               | [GitHub](https://github.com/opencv/opencv-python)         |
+| pandas                 | BSD 3-Clause License      | [GitHub](https://github.com/pandas-dev/pandas)            |
+| Pillow                 | MIT-CMU License           | [GitHub](https://github.com/python-pillow/Pillow)         |
+| pybullet               | zlib/libpng License       | [GitHub](https://github.com/bulletphysics/bullet3)        |
+| pygeoops               | BSD 3-Clause License      | [GitHub](https://github.com/pygeoops/pygeoops)            |
+| pygltflib              | MIT License               | [GitHub](https://github.com/avaturn/pygltflib)            |
+| pyogrio                | MIT License               | [GitHub](https://github.com/geopandas/pyogrio)            |
+| pypdfium2              | Apache-2.0 / BSD-3-Clause | [GitHub](https://github.com/pypdfium2-team/pypdfium2)     |
+| pyproj                 | MIT License               | [GitHub](https://github.com/pyproj4/pyproj)               |
+| Pyshp                  | MIT License               | [GitHub](https://github.com/GeospatialPython/pyshp)       |
+| Python Tesseract       | Apache License 2.0        | [GitHub](https://github.com/madmaze/pytesseract)          |
+| Rasterio               | BSD 3-Clause License      | [GitHub](https://github.com/mapbox/rasterio)              |
+| Rtree                  | MIT License               | [GitHub](https://github.com/Toblerity/rtree)              |
+| scikit-image           | BSD 3-Clause License      | [GitHub](https://github.com/scikit-image/scikit-image)    |
+| scikit-learn           | BSD 3-Clause License      | [GitHub](https://github.com/scikit-learn/scikit-learn)    |
+| scikit-spatial         | BSD 3-Clause License      | [GitHub](https://github.com/ajhynes7/scikit-spatial)      |
+| SciPy                  | BSD 3-Clause License      | [GitHub](https://github.com/scipy/scipy)                  |
+| Shapely                | BSD 3-Clause License      | [GitHub](https://github.com/Toblerity/Shapely)            |
+| TKY2JGD                | BSD 3-Clause License      | [GitHub](https://github.com/mugwort-rc/TKY2JGD)           |
+| PyTorch                | BSD 3-Clause License      | [GitHub](https://github.com/pytorch/pytorch)              |
+| trimesh                | MIT License               | [GitHub](https://github.com/mikedh/trimesh)               |
+| tripy                  | MIT License               | [GitHub](https://github.com/linuxlewis/tripy)             |
 
 ## 免責事項
 本リポジトリの内容は予告なく変更・削除する可能性があります。

@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -41,14 +41,15 @@ from nifiapi.flowfiletransform import FlowFileTransform, FlowFileTransformResult
 from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope
 
 # 外部ライブラリの動的インポート
-Polygon = import_module("shapely").geometry.Polygon
-LineString = import_module("shapely").geometry.LineString
-box = import_module("shapely").geometry.box
-MultiLineString = import_module("shapely").geometry.MultiLineString
-
-MultiPolygon = import_module("shapely").geometry.MultiPolygon
-MultiPoint = import_module("shapely").geometry.MultiPoint
 Point = import_module("shapely").geometry.Point
+LineString = import_module("shapely").geometry.LineString
+Polygon = import_module("shapely").geometry.Polygon
+MultiPoint = import_module("shapely").geometry.MultiPoint
+MultiLineString = import_module("shapely").geometry.MultiLineString
+MultiPolygon = import_module("shapely").geometry.MultiPolygon
+box = import_module("shapely").geometry.box
+unary_union = import_module("shapely.ops").unary_union
+np = import_module("numpy")
 
 
 class GetUnitCodeFromGeometry(FlowFileTransform):
@@ -59,8 +60,8 @@ class GetUnitCodeFromGeometry(FlowFileTransform):
         version = "1.0.0"
         description = """
                         ジオメトリが属する図郭コードを取得する。
-                        ①input: ジオメトリ1行のFieldSetFile。
-                        ①output: ジオメトリ1行のFieldSetFile。
+                        ①input: マルチパッチか、ジオメトリ1行のFieldSetFile。
+                        ①output: マルチパッチか、ジオメトリ1行のFieldSetFile。
                       """
         tags = ['Geometry', 'Attributes', 'Python']
 
@@ -75,7 +76,17 @@ class GetUnitCodeFromGeometry(FlowFileTransform):
         expression_language_scope=ExpressionLanguageScope.NONE
     )
 
-    property_descriptors = [UNIT_LEVEL]
+    # 座標参照系（CRS）を示すプロパティの値
+    TARGET_CRS = PropertyDescriptor(
+        name='Target CRS',
+        description='入力データのCRS(epsgコード)',
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
+        required=False,
+        sensitive=False
+    )
+
+    property_descriptors = [UNIT_LEVEL,
+                            TARGET_CRS]
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -91,12 +102,15 @@ class GetUnitCodeFromGeometry(FlowFileTransform):
             context : プロセッサの設定値が格納されているデータ
 
         戻り値:
-            unit_level : 地図情報レベル
+            unit_level: 地図情報レベル
+            target_crs: 入力データのCRS(epsgコード)
         """
 
         unit_code_level = context.getProperty(self.UNIT_LEVEL).getValue()
 
-        return unit_code_level
+        target_crs = context.getProperty(self.TARGET_CRS).getValue()
+
+        return unit_code_level, target_crs
 
     def create_polygon(self, x_offset, y_offset, width_m, height_m, origin_x, origin_y):
         """
@@ -293,20 +307,60 @@ class GetUnitCodeFromGeometry(FlowFileTransform):
 
         return temp_5000_dict
 
+    def multipatch_to_exterior_polygon(self, triangles):
+        """
+        マルチパッチ（三角面群）を2Dポリゴンの外周形状に変換する
+        - 3D座標の z 値を無視し、XY 平面に射影して処理。
+        - 各三角形を 2D Polygon に変換し、unary_union で結合することで
+          重なりや隙間を吸収し、外形（輪郭）ポリゴンを抽出。
+        - 結果が MultiPolygon の場合は、最も面積の大きいポリゴンを採用。
+
+        引数:
+            triangles(numpy.ndarray) : - 形状: (n_triangles, 3, 3)
+                                       - 各三角形は3つの頂点 (x, y, z) を持つ。
+
+        戻り値:
+        shapely.geometry.Polygon or None
+            - 三角面群の統合結果から得られる2Dポリゴンの外周境界（exterior）。
+            - 入力データが不正または面として統合できない場合は None を返す。
+        """
+
+        triangles_2d = triangles[:, :, :2]
+
+        # 三角形ごとにPolygon化
+        polys = [Polygon(tri) for tri in triangles_2d]
+
+        # 全ての三角形を union して外周だけを抽出
+        merged = unary_union(polys)
+
+        if merged.geom_type == 'Polygon':
+            return Polygon(merged.exterior)
+
+        elif merged.geom_type == 'MultiPolygon':
+            largest = max(merged.geoms, key=lambda p: p.area)
+            return Polygon(largest.exterior)
+
+        else:
+            return None
+
     def transform(self, context, flowfile):
         try:
             # プロパティで入力した値を取得
-            unit_code_level = WM.calc_func_time(
-                self.logger)(self.get_property)(context)
+            unit_code_level, \
+                target_crs\
+                = WM.calc_func_time(self.logger)(self.get_property)(context)
 
             field_set_file_dataframe, geometry_dwh, geometry_type, geometry_value_list = WM.calc_func_time(
                 self.logger)(PBP.get_dataframe_and_value_from_field_set_file)(flowfile)
 
-            # CRSの取得
-            try:
-                crs = flowfile.getAttribute("crs")
-            except Exception:
-                self.logger.error(traceback.format_exc())
+            if target_crs is None or target_crs == "":
+                try:
+                    crs = flowfile.getAttribute("crs")
+                except Exception:
+                    self.logger.error(traceback.format_exc())
+
+            else:
+                crs = target_crs
 
             # ターゲットレベルの取得
             try:
@@ -314,13 +368,56 @@ class GetUnitCodeFromGeometry(FlowFileTransform):
             except Exception:
                 self.logger.error(traceback.format_exc())
 
+            multipatch_flag = False
+
+            # マルチパッチ→マルチパッチ外周のpolygon
+            # 1. 各 id ごとの構成点を抽出
+            # 2. それを三角形配列 (n_delaunay, 3, 3) の形に整形
+            # 3. 各三角形を Shapely Polygon に変換
+            # 4. 全ての三角形を union して外周の2Dポリゴンに変換
+            # といった流れで 3D → 2D 平面ポリゴンへ変換を行う
+            if isinstance(geometry_value_list, np.ndarray):
+
+                multipatch_flag = True
+
+                # id列のユニーク値を取得
+                coordinates_id_array = np.unique(geometry_value_list[:,0])
+
+                # IDごとの構成点座標取得（キー：地物ID、値：地物IDの構成点のxyz座標）
+                id_coordinate_dict = {
+                    coordinates_id_array[i]: geometry_value_list[
+                        list(np.where(geometry_value_list[:, 0] == coordinates_id_array[i])[0]), 1:4
+                    ] for i in range(len(coordinates_id_array))
+                }
+
+                # 各idの配列を reshape し、三角面単位に整形。
+                #   multipatchデータでは、1つの三角形を構成する頂点が4点（1点重複を含む）で格納、
+                #   4頂点単位で reshape し、先頭3点のみを取り出して (n_delaunay, 3, 3) 配列に
+                id_coordinate_dict = {id: array.reshape(int(len(array)/4),4,3)[:,:3,:] for id, array in id_coordinate_dict.items()}
+
+                # multipatch_to_exterior_polygon()：
+                #   - 各三角形を shapely.geometry.Polygon に変換
+                #   - union して面全体を統合
+                #   - 最も大きいポリゴンの外周境界を返す
+                #   ※ Z座標は無視してXY平面に投影
+                geometry_value_list = []
+
+                for id, tri_array in id_coordinate_dict.items():
+                    poly = WM.calc_func_time(self.logger)(self.multipatch_to_exterior_polygon)(tri_array)
+
+                    if poly:
+                        geometry_value_list.append(poly)
+
+            else:
+                pass
+
             try:
                 # 対象のジオメトリがどの、エリアにいるのかを特定するために、マルチ化。
                 # こうすることで、大幅な処理時間の短縮になる。
                 if isinstance(geometry_value_list[0], LineString):
                     multi_geometry = MultiLineString(geometry_value_list)
 
-                elif isinstance(geometry_value_list[0], Polygon):
+                elif isinstance(geometry_value_list[0], Polygon) or multipatch_flag:
                     multi_geometry = MultiPolygon(geometry_value_list)
 
                 elif isinstance(geometry_value_list[0], Point):
@@ -492,7 +589,15 @@ class GetUnitCodeFromGeometry(FlowFileTransform):
             # 各要素を@で区切り、文字列化
             unit_code = "@".join(sorted_unit_code_list)
 
-            return FlowFileTransformResult(relationship="success", attributes={"unit_code": unit_code})
+            if target_crs is None or target_crs == "":
+                attributes_dict = {"unit_code": unit_code}
+
+            else:
+                attributes_dict = {"unit_code": unit_code,
+                                   "crs": crs}
+
+            return FlowFileTransformResult(relationship="success",
+                                        attributes=attributes_dict)
 
         except Exception:
             self.logger.error(traceback.format_exc())

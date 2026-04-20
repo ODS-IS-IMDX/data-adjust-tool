@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -62,7 +63,7 @@ class ConvertNullFieldToDefaultValue(FlowFileTransform):
     DEFAULT_VALUE = PropertyDescriptor(
         name="Default Value",
         description="Null値を置換した後の既定値",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
         required=True
     )
@@ -72,7 +73,7 @@ class ConvertNullFieldToDefaultValue(FlowFileTransform):
         name="Default Value Type If All Null",
         description="全てがNull値だった時の、既定値のデータ型",
         required=True,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
         allowable_values=[TYPE_INT, TYPE_FLOAT, TYPE_STR],
     )
@@ -81,7 +82,7 @@ class ConvertNullFieldToDefaultValue(FlowFileTransform):
     MAX_VALUE_IN_RANGE = PropertyDescriptor(
         name="Max Value In Range",
         description="適切な値の範囲に収まる最大値（未入力時は最大値を定めない。）",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
         required=False
     )
@@ -91,7 +92,7 @@ class ConvertNullFieldToDefaultValue(FlowFileTransform):
         name="Min Value In Range",
         description="適切な値の範囲に収まる最小値（未入力時は最小値を定めない。）",
         required=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
     )
 
@@ -109,7 +110,7 @@ class ConvertNullFieldToDefaultValue(FlowFileTransform):
         name="Delete String Null Flag",
         description="文字列のNull,NULL,None,NONE,nan,Nan,NaN,#N/Aも削除するかどうかのフラグ",
         required=True,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False,
         default_value=DELETE_TRUE,
         allowable_values=[DELETE_TRUE, DELETE_FALSE],

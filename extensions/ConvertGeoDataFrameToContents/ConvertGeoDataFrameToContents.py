@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,10 +54,8 @@ class ConvertGeoDataFrameToContents(FlowFileTransform):
 
     # GeoDataframeに設定するオプションCSV
     OUTPUT_OPTION_CSV = PropertyDescriptor(
-        name="Output Option CSV",
-        description="""GeoDataframeに設定するオプション（CSV形式）。
-                      ※GeoPandasライブラリのto_fileメソッドで用いるオプションを指定
-                    """,
+        name="output_option_csv",
+        description="GeoDataframeに設定するオプションCSV",
         expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         default_value="OPTION,VALUE",
         sensitive=False,
@@ -81,10 +79,11 @@ class ConvertGeoDataFrameToContents(FlowFileTransform):
         if "driver" in option_list:
             pass
         else:
-            return "driverを設定してください"
+            raise Exception('driverを設定してください')
 
+        
         temp_object = io.BytesIO()
-
+        
         #driver取得
         driver_index=option_list.index('driver')
         driver_string=value_list[driver_index]
@@ -162,11 +161,7 @@ class ConvertGeoDataFrameToContents(FlowFileTransform):
                 = WM.calc_func_time(self.logger)(self.get_contents_from_geodataframe)(geodataframe,
                                                                                       output_option_dataframe)
             # ---------------------------------------------------------------------------
-
-            if result_object == "driverを設定してください":
-                self.logger.error('driverを設定してください')
-                return FlowFileTransformResult(relationship="failure")
-
+            
             # 結果を返す
             return FlowFileTransformResult(relationship="success",
                                            contents=result_object)

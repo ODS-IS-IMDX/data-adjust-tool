@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -75,7 +76,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
         name='Shapefile Encode',
         description='シェープファイルの文字コード',
         default_value='shift-jis',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -85,7 +86,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
         name='Shapefile CRS',
         description='シェープファイルのCRS(epsgコード)',
         default_value='6677',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -94,7 +95,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
     X_OFFSET = PropertyDescriptor(
         name='Latitude(X) Offset',
         description='緯度(x座標)の平行移動値',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         default_value="0",
         sensitive=False,
         required=False
@@ -104,7 +105,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
     Y_OFFSET = PropertyDescriptor(
         name='Longitude(Y) Offset',
         description='経度(y座標)の平行移動値',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         default_value="0",
         sensitive=False,
         required=False
@@ -114,7 +115,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
     SPECIFY_UNIT = PropertyDescriptor(
         name='Specify Unit',
         description='座標データの単位(ミリ、センチ、メートル、キロ、経緯度)',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         allowable_values=[MILLIMETER, CENTIMETER,
                           DECIMETER, METER, KILOMETER, DEGREE],
         sensitive=False,
@@ -133,7 +134,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
     def getPropertyDescriptors(self):
         return self.property_descriptors
 
-    def get_property(self, context):
+    def get_property(self, context, flowfile):
         """
         概要:
             プロパティで入力した値を取得する関数
@@ -151,11 +152,11 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
 
         # プロパティの取得
         shape_file_encode = context.getProperty(
-            self.SHAPE_FILE_ENCODE).getValue()
-        shape_file_crs = context.getProperty(self.SHAPE_FILE_CRS).getValue()
-        x_offset = context.getProperty(self.X_OFFSET).getValue()
-        y_offset = context.getProperty(self.Y_OFFSET).getValue()
-        specify_unit = context.getProperty(self.SPECIFY_UNIT).getValue()
+            self.SHAPE_FILE_ENCODE).evaluateAttributeExpressions(flowfile).getValue()
+        shape_file_crs = context.getProperty(self.SHAPE_FILE_CRS).evaluateAttributeExpressions(flowfile).getValue()
+        x_offset = context.getProperty(self.X_OFFSET).evaluateAttributeExpressions(flowfile).getValue()
+        y_offset = context.getProperty(self.Y_OFFSET).evaluateAttributeExpressions(flowfile).getValue()
+        specify_unit = context.getProperty(self.SPECIFY_UNIT).evaluateAttributeExpressions(flowfile).getValue()
 
         # 上記のプロパティの値を確認するログ
         self.logger.info(
@@ -272,7 +273,7 @@ class ConvertShapeFileToGeoDataFrame(FlowFileTransform):
                 x_offset, \
                 y_offset, \
                 specify_unit\
-                = WM.calc_func_time(self.logger)(self.get_property)(context)
+                = WM.calc_func_time(self.logger)(self.get_property)(context, flowfile)
 
             # ZIPファイルからGeoDataFrameを作成
             shape_dataframe = WM.calc_func_time(self.logger)(

@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +52,7 @@ class ValidateConvertGeoJSONToGeoDataFrame(DataProcessingBaseValidateProcessor):
         name='GeoJSON File Encode',
         description='GeoJSONの文字コード',
         default_value='shift-jis',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -61,7 +62,7 @@ class ValidateConvertGeoJSONToGeoDataFrame(DataProcessingBaseValidateProcessor):
         name='GeoJSON File CRS',
         description='GeoJSONのCRS(epsgコード)',
         default_value='6677',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -91,11 +92,11 @@ class ValidateConvertGeoJSONToGeoDataFrame(DataProcessingBaseValidateProcessor):
 
             # GeoJSONのエンコーディング取得
             geojson_file_encode = context.getProperty(
-                self.GEOJSON_FILE_ENCODE).getValue()
+                self.GEOJSON_FILE_ENCODE).evaluateAttributeExpressions(flowfile).getValue()
 
             # GeoJSONの座標参照系（CRS）取得
             geojson_file_crs = context.getProperty(
-                self.GEOJSON_FILE_CRS).getValue()
+                self.GEOJSON_FILE_CRS).evaluateAttributeExpressions(flowfile).getValue()
 
             # --------------------------------------------------------------------------
             # geojson_file_crsが正しいepsgかどうかの検証

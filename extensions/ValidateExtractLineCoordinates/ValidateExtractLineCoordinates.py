@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Python標準ライブラリ
-from importlib import import_module
-import pickle
-
-# 外部ライブラリの動的インポート
-LineString = getattr(import_module("shapely.geometry"), "LineString")
-
 import cad.common.cad_utils as CU
+
 from cad.common.cad_base_validate_processor import CadBaseValidateProcessor
 from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope, StandardValidators
 from common.error_code_list import ErrorCodeList
+from shapely.geometry import LineString
+import pickle
 
 
 class ValidateExtractLineCoordinates(CadBaseValidateProcessor):
@@ -38,7 +34,7 @@ class ValidateExtractLineCoordinates(CadBaseValidateProcessor):
         implements = ['org.apache.nifi.python.processor.FlowFileTransform']
 
     class ProcessorDetails:
-        version = '1.0.0'
+        version = "1.0.0"
         description = '''プロセッサー「ExtractLineCoordinates」の入力データのチェックを行う'''
         tags = ['pickle', 'python', 'validate']
 

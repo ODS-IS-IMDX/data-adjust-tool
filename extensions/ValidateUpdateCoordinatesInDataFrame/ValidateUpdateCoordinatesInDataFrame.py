@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,7 @@ from common.error_code_list import ErrorCodeList
 gpd = import_module("geopandas")
 pd = import_module("pandas")
 np = import_module("numpy")
-
+BaseGeometry = import_module("shapely.geometry.base").BaseGeometry
 
 class ValidateUpdateCoordinatesInDataFrame(DataProcessingBaseValidateProcessor):
     class Java:
@@ -139,79 +139,132 @@ class ValidateUpdateCoordinatesInDataFrame(DataProcessingBaseValidateProcessor):
                                                           target_dwh_list,
                                                           target_dwh_list[1])
 
-            # 1行目と2行目がどちらも型が違う場合
-            if isinstance(line1_object, np.ndarray):
-                # 1行目がcoordinates_array型であれば、2行目はGeoDataFrame型かを検証
-                if not self.validate_input_type(line2_object, "GeoDataFrame"):
+            # 1行目が、GeoDataFrameの場合
+            if isinstance(line1_object, gpd.GeoDataFrame):
+
+                # 2行目が配列、shapelyオブジェクトか検証
+                if isinstance(line2_object, np.ndarray) or (isinstance(line2_object, list) and all(isinstance(obj, BaseGeometry) for obj in line2_object)):
+
+                    # 座標配列の場合は、2d,3dの座標配列か検証
+                    if isinstance(line2_object, np.ndarray):
+                        # 座標配列か検証
+                        if not self.validate_2d_or_3d_coordinates_array(line2_object, target_dwh_list[1]):
+                            result = False
+                            if self.mode_value == self.MODE_STOP:
+                                return self.RESULT_FAILURE
+
+                    # shapelyは検証なし
+                    else:
+                        pass
+
+                # 2行目が配列でも、shapelyオブジェクトでもない場合はエラーを出力
+                else:
                     result = False
+                    args = {"error_code": ErrorCodeList.EC00008,
+                            "問題の行のDWH":target_dwh_list[1],
+                            "期待するデータ型": "np.array(coordinates), Shapely list(ジオメトリリスト)",
+                            "入力されたデータ型": str(type(line2_object))
+                            }
+                    self.validate_logger.write_log(**args)
+
                     if self.mode_value == self.MODE_STOP:
                         return self.RESULT_FAILURE
 
-            elif isinstance(line2_object, np.ndarray):
-                # 2行目がcoordinates_array型であれば、1行目はGeoDataFrame型かを検証
-                if not self.validate_input_type(line1_object, "GeoDataFrame"):
-                    result = False
-                    if self.mode_value == self.MODE_STOP:
-                        return self.RESULT_FAILURE
-
-            elif isinstance(line1_object, gpd.GeoDataFrame):
-                if not self.validate_input_type(line2_object, "coordinates_array"):
-                    result = False
-                    if self.mode_value == self.MODE_STOP:
-                        return self.RESULT_FAILURE
-
+            # 2行目がGeoDataFrameの場合
             elif isinstance(line2_object, gpd.GeoDataFrame):
-                if not self.validate_input_type(line1_object, "coordinates_array"):
+
+                # 1行目が配列、shapelyオブジェクトか検証
+                if isinstance(line1_object, np.ndarray) or (isinstance(line1_object, list) and all(isinstance(obj, BaseGeometry) for obj in line1_object)):
+
+                    # 座標配列の場合は、2d,3dの座標配列か検証
+                    if isinstance(line1_object, np.ndarray):
+                        # 座標配列が、2d,3dの座標配列
+                        if not self.validate_2d_or_3d_coordinates_array(line1_object, target_dwh_list[0]):
+                            result = False
+                            if self.mode_value == self.MODE_STOP:
+                                return self.RESULT_FAILURE
+
+                    # Shapelyの場合は検証なし
+                    else:
+                        pass
+
+                # 1行目が配列でも、shapelyオブジェクトでもない場合はエラーを出力
+                else:
                     result = False
+                    args = {"error_code": ErrorCodeList.EC00008,
+                            "問題の行のDWH":target_dwh_list[0],
+                            "期待するデータ型": "np.array(coordinates), Shapely list(ジオメトリリスト)",
+                            "入力されたデータ型": str(type(line1_object))
+                            }
+                    self.validate_logger.write_log(**args)
+
                     if self.mode_value == self.MODE_STOP:
                         return self.RESULT_FAILURE
 
             else:
-                # 両方がnp.ndarrayでもGeoDataFrameでもない場合
-                self.validate_logger.write_log(ErrorCodeList.ED00002)
-                self.validate_logger.write_log(ErrorCodeList.ED00005)
+                # 1行目と2行目の両方がGeoDataFrameでない場合 → エラーを出力
                 result = False
+                args = {
+                    "error_code": ErrorCodeList.EC00008,
+                    "問題の行のDWH": f"{target_dwh_list[0]}, {target_dwh_list[1]}",
+                    "期待するデータ型": "GeoDataFrame",
+                    "入力されたデータ型": f"{type(line1_object)}, {type(line2_object)}"
+                }
+                self.validate_logger.write_log(**args)
+
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE
 
-            # クラスを比較してGeoDataFrameと座標配列に分ける
-            if isinstance(line1_object, np.ndarray):
+            if isinstance(line1_object, gpd.GeoDataFrame):
 
-                coordinates_array = line1_object.copy()
-                geodataframe = line2_object.copy()
+                geodataframe = line1_object.copy()
+                coordinates_array_or_geometry_list = line2_object.copy()
 
             else:
-                coordinates_array = line2_object.copy()
-                geodataframe = line1_object.copy()
+                geodataframe = line2_object.copy()
+                coordinates_array_or_geometry_list = line1_object.copy()
 
-            try:
-                # DataFrameからジオメトリタイプ取得
-                _, \
-                    geometry_type_list, \
-                    _\
-                    = NSP.get_coordinates_array_from_geodataframe(geodataframe)
+            if isinstance(coordinates_array_or_geometry_list, np.ndarray):
 
-            except Exception:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00067)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
+                try:
+                    # DataFrameからジオメトリタイプ取得
+                    _, \
+                        geometry_type_list, \
+                        _\
+                        = NSP.get_coordinates_array_from_geodataframe(geodataframe)
 
-            try:
-                coordinates_dict\
-                    = NSP.get_shapely_dict_from_coordinates_array(coordinates_array,  geometry_type_list)
+                except Exception:
+                    self.validate_logger.write_log(
+                        error_code=ErrorCodeList.ED00067)
+                    result = False
+                    if self.mode_value == self.MODE_STOP:
+                        return self.RESULT_FAILURE
 
-            except Exception:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00068)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
+                try:
+                    coordinates_dict\
+                        = NSP.get_shapely_dict_from_coordinates_array(coordinates_array_or_geometry_list,  geometry_type_list)
 
-            dataframe = UC.field_set_file_to_dataframe(input_data)
+                except Exception:
+                    self.validate_logger.write_log(
+                        error_code=ErrorCodeList.ED00068)
+                    result = False
+                    if self.mode_value == self.MODE_STOP:
+                        return self.RESULT_FAILURE
 
-            if not self.validate_gdf_shape(dataframe, data_name="DataFrame"):
+            # 20250611_横田追加分
+            else:
+                if len(coordinates_array_or_geometry_list) == len(geodataframe):
+                    pass
+                else:
+                    args = {"error_code": ErrorCodeList.EC00004,
+                            "ジオメトリリストのレコード数": f"{len(coordinates_array_or_geometry_list)}",
+                            "GeoDataFrameのレコード数": f"{len(geodataframe)}"}
+                    self.validate_logger.write_log(**args)
+                    result = False
+                    if self.mode_value == self.MODE_STOP:
+                        return self.RESULT_FAILURE
+
+            if not self.validate_gdf_shape(field_set_file_dataframe, data_name="DataFrame"):
                 result = False
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE

@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -56,7 +57,7 @@ class TransformCoordinateUsingParameterFile(FlowFileTransform):
         description="パラメータファイル（.par）のパス",
         required=True,
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES
     )
 
     EXCHANGE_CRS = PropertyDescriptor(
@@ -65,7 +66,7 @@ class TransformCoordinateUsingParameterFile(FlowFileTransform):
         required=True,
         sensitive=False,
         allowable_values=["旧測地系からJGD2000", "JGD2000からJGD2011"],
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
     )
 
     # ★プロパティを設定した後にlistへ格納
@@ -88,10 +89,10 @@ class TransformCoordinateUsingParameterFile(FlowFileTransform):
             # 画面の入力値取得
             # --------------------------------------------------------------------------
             parameter_file_path\
-                = context.getProperty(self.PARAMETER_FILE_PATH).getValue()
+                = context.getProperty(self.PARAMETER_FILE_PATH).evaluateAttributeExpressions(flowfile).getValue()
 
             exchange_CRS\
-                = context.getProperty(self.EXCHANGE_CRS).getValue()
+                = context.getProperty(self.EXCHANGE_CRS).evaluateAttributeExpressions(flowfile).getValue()
 
             # --------------------------------------------------------------------------
             # flowfile→FieldSetFileのDataFrame

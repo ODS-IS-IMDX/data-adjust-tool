@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -535,6 +535,50 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
 
         return element_dict, output_element_tree
 
+    def add_attribute_to_element(self, element_list, element_object):
+        
+        if len(element_list)>1:
+
+            for element in element_list[1:]:
+                # 1つ目以降の要素
+                # '='でsplitして属性名と属性値に分ける
+                value_split_list = element.split(DDC.XML_ATTRIBUTE_VALUE_DELIMITER)
+                
+                # 追加
+                element_object.set(value_split_list[0],
+                                value_split_list[1])
+        else:
+            pass
+        
+        return element_object
+
+    def create_element_attribute(self, element_list, element_dict):
+        # ---------------------------------------------------------------
+        # ネストされた要素を作成 最後の要素を返す←値を追加する用
+        # 引数1：要素名List 要素はstr
+        # ---------------------------------------------------------------
+        root = ET.Element(element_list[0][0])
+        root=self.add_attribute_to_element(element_list[0], root)
+        element_dict["-".join(element_list[0])] = root
+        
+        if len(element_list)==1:
+            return root, root, element_dict
+        else:
+            pass
+
+        sub_element = ET.SubElement(root, element_list[1][0])
+        sub_element=self.add_attribute_to_element(element_list[1],sub_element)
+        element_dict["-".join(element_list[1])] = sub_element
+
+        for fi in range(len(element_list)-2):
+            sub_element = ET.SubElement(sub_element, element_list[fi + 2][0])
+            sub_element=self.add_attribute_to_element(element_list[fi+2],sub_element)
+
+            element_dict["-".join(element_list[fi+2])] = sub_element
+
+        return root, sub_element, element_dict
+
+
     def decide_to_add_attribute_to_tag(self, attribute_split_list, output_element_tree, attribute_array_list, all_attribute_name_list_index, index):
         """
         概要:
@@ -552,13 +596,25 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
         """
 
         attribute_element = ET.Element(attribute_split_list[0][0])
-        output_element_tree.append(attribute_element)
+
+        attribute_element\
+            =self.add_attribute_to_element(attribute_split_list[0],
+                                           attribute_element) 
+
         attribute_element.text = str(
             attribute_array_list[all_attribute_name_list_index][index])
 
+        output_element_tree.append(attribute_element)
+
         return attribute_element
 
-    def append_attribute_to_tag(self, element_dict, attribute_split_list, attribute_array_list, all_attribute_name_list_index, index):
+    def append_attribute_to_tag(self,
+                                element_dict,
+                                attribute_split_list,
+                                attribute_array_list,
+                                all_attribute_name_list_index,
+                                index,
+                                key_bool):
         """
         概要:
             要素の辞書に対して、指定されたタグに属性を追加する関数
@@ -574,14 +630,36 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
             already_element_tree: 指定されたタグとテキストを持つ新しいXML要素
         """
 
-        already_element_tree = ET.SubElement(
-            element_dict[attribute_split_list[-2][0]], attribute_split_list[-1][0])
-        already_element_tree.text = str(
+        # 取り出すタグのインデックス特定
+        # 初めてFalseがでるひとつ前のインデックス
+        if np.all(key_bool):
+            target_index=0
+        else:
+            target_index=np.min(np.where(np.logical_not(key_bool)))-1
+            
+        # 設定するタグの作成
+        element_list=attribute_split_list[target_index+1:]
+        sub_element=element_dict["-".join(attribute_split_list[target_index])]
+        
+        for fi in range(len(element_list)):
+            sub_element = ET.SubElement(sub_element, element_list[fi][0])
+            sub_element=self.add_attribute_to_element(element_list[fi],sub_element)
+
+            element_dict["-".join(element_list[fi])] = sub_element
+        
+        # 地物の属性値を設定
+        sub_element.text = str(
             attribute_array_list[all_attribute_name_list_index][index])
+        
+        return sub_element
 
-        return already_element_tree
-
-    def add_attribute_to_tag_in_element_dict(self, attribute_split_list, attribute_array_list, all_attribute_name_list_index, index, element_dict, output_element_tree):
+    def add_attribute_to_tag_in_element_dict(self,
+                                             attribute_split_list,
+                                             attribute_array_list,
+                                             all_attribute_name_list_index,
+                                             index,
+                                             element_dict,
+                                             output_element_tree):
         """
         概要:
             要素の辞書に特定のタグに属性を追加する関数。
@@ -598,8 +676,10 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
             attribute_subelement: 属性の副要素
         """
 
-        attribute_element, attribute_subelement, element_dict = WM.calc_func_time(
-            self.logger, False)(NSP.create_element2)(attribute_split_list, element_dict)
+        attribute_element,\
+        attribute_subelement,\
+        element_dict\
+            = self.create_element_attribute(attribute_split_list, element_dict)
         output_element_tree.append(attribute_element)
         attribute_subelement.text = str(
             attribute_array_list[all_attribute_name_list_index][index])
@@ -764,24 +844,24 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
                                                                                          )
             # -----------------------------------------------------------------------------------------------------------
 
-    # -----------------------------------------------------------------------------------------------------------
-    # field_set_dataframeからcoordinates_arrayを抜き出し、coordinates_dictに変換する
-    # -----------------------------------------------------------------------------------------------------------
+            # -----------------------------------------------------------------------------------------------------------
+            # field_set_dataframeからcoordinates_arrayを抜き出し、coordinates_dictに変換する
+            # -----------------------------------------------------------------------------------------------------------
             coordinates_id_array, coordinates_dict = WM.calc_func_time(self.logger)(
                 self.create_coordinates_id_array_and_dict_from_coordinates_array)(field_set_file_data_frame, geometry_dwh_file_name_list)
-    # -----------------------------------------------------------------------------------------------------------
-    # 【取得】中心線npy取得
-    # -----------------------------------------------------------------------------------------------------------
+            # -----------------------------------------------------------------------------------------------------------
+            # 【取得】中心線npy取得
+            # -----------------------------------------------------------------------------------------------------------
             linestring_id_array, linestring_dict = WM.calc_func_time(self.logger)(
                 self.create_linestring_dict_from_field_set_file_data_frame)(field_set_file_data_frame, center_dwh_name)
-    # -----------------------------------------------------------------------------------------------------------
+            # -----------------------------------------------------------------------------------------------------------
 
-    # -----------------------------------------------------------------------------------------------------------
-    # 【取得】データ定義ファイルに指定された属性項目ファイルをすべて読み込み一つのDataFrameとする
-    # -----------------------------------------------------------------------------------------------------------
+            # -----------------------------------------------------------------------------------------------------------
+            # 【取得】データ定義ファイルに指定された属性項目ファイルをすべて読み込み一つのDataFrameとする
+            # -----------------------------------------------------------------------------------------------------------
             attribute_feature_id_array, all_attribute_dataframe = WM.calc_func_time(self.logger)(NSP.create_attribute_dataframe_datatype)(
                 field_set_file_data_frame, attribute_dwh_file_name_list, attribute_distribution_name_list, attribute_const_value_list, attribute_file_type_list, attribute_data_type_list, len(coordinates_id_array), encoding='UTF-8', input_file_type=1)
-    # -----------------------------------------------------------------------------------------------------------
+            # -----------------------------------------------------------------------------------------------------------
 
             # 空文字をnanに変更
             all_attribute_dataframe = all_attribute_dataframe.replace(
@@ -914,126 +994,51 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
                     # 属性追加 これの内側にジオメトリ追加
                     # -----------------------------------------------------------------------------------------------------------
                     for all_attribute_name_list_index in range(len(all_attribute_name_list)):
-
+                        
+                        # タグと属性に分割
                         try:
                             attribute_split_list = [temp.split(
                                 DDC.XML_ATTRIBUTE_DELIMITER_FOR_LINESTRING) for temp in all_attribute_name_list[all_attribute_name_list_index]]
+
+                            # XML属性名とXML属性値をキーとする
+                            key_list=["-".join(attribute_split) for attribute_split in attribute_split_list]
+                            key_bool= np.array([key in element_dict for key in key_list], dtype=np.bool_)
+                        
                         except Exception:
                             self.logger.error(traceback.format_exc())
                             return FlowFileTransformResult(relationship="failure")
-
-                        if len(attribute_split_list) == 1:
+                        
+                        # 最初のタグが設定されていない場合
+                        if np.all(key_bool==False) or (key_bool[0] == False):
 
                             # 中でタグに属性追加するか判定
-                            attribute_element = WM.calc_func_time(self.logger)(self.decide_to_add_attribute_to_tag)(
-                                attribute_split_list, output_element_tree, attribute_array_list, all_attribute_name_list_index, index)
-
-                            # '|'でsplitした結果複数の要素が存在する場合2つ目以降の要素は属性として登録する
-                            # 文字列は'='でsplitして最初の要素を属性名、属性値とする
-                            # 追加タグの要素数チェック 属性が入っているなら追加
-                            if len(attribute_split_list[0]) > 1:
-                                try:
-                                    # 1つ目以降の要素
-                                    value_list = attribute_split_list[0][1:]
-
-                                    # '='でsplitして属性名と属性値に分ける
-                                    value_split_list = [value_list[spi].split(
-                                        DDC.XML_ATTRIBUTE_VALUE_DELIMITER) for spi in range(len(value_list))]
-                                    # 追加
-                                    [attribute_element.set(value_split_list[vi][0], value_split_list[vi][1]) for vi in range(
-                                        len(value_split_list))]
-
-                                except Exception:
-                                    self.logger.error(traceback.format_exc())
-                                    return FlowFileTransformResult(relationship="failure")
-
-                            else:
-                                pass
-
-                            try:
-                                # 追加対象タグ名
-                                add_target_tag_name = attribute_split_list[0][0]
-
-                            except Exception:
-                                self.logger.error(traceback.format_exc())
-                                return FlowFileTransformResult(relationship="failure")
-
-                        # 2回以上同じクラスが出てくる場合
-                        elif attribute_split_list[-2][0] in element_dict:
-
-                            already_element_tree = WM.calc_func_time(self.logger)(self.append_attribute_to_tag)(element_dict,
-                                                                                                                attribute_split_list,
-                                                                                                                attribute_array_list,
-                                                                                                                all_attribute_name_list_index,
-                                                                                                                index)
-
-                            # 追加タグの要素数チェック 属性が入っているなら追加
-                            if len(attribute_split_list[-1]) > 1:
-                                try:
-                                    # 1つ目以降の要素
-                                    value_list = attribute_split_list[-1][1:]
-
-                                    # '='でsplitして属性名と属性値に分ける
-                                    value_split_list = [value_list[spi].split(
-                                        DDC.XML_ATTRIBUTE_VALUE_DELIMITER) for spi in range(len(value_list))]
-
-                                    # 追加
-                                    [already_element_tree.set(
-                                        value_split_list[vi][0], value_split_list[vi][1]) for vi in range(len(value_split_list))]
-
-                                except Exception:
-                                    self.logger.error(traceback.format_exc())
-                                    return FlowFileTransformResult(relationship="failure")
-
-                            else:
-                                pass
-                            try:
-                                # 追加対象タグ名
-                                add_target_tag_name = attribute_split_list[-1][0]
-
-                            except Exception:
-                                self.logger.error(traceback.format_exc())
-                                return FlowFileTransformResult(relationship="failure")
-
+                            attribute_element\
+                                =WM.calc_func_time(self.logger)\
+                                                  (self.add_attribute_to_tag_in_element_dict)\
+                                                  (attribute_split_list,
+                                                   attribute_array_list,
+                                                   all_attribute_name_list_index,
+                                                   index,
+                                                   element_dict,
+                                                   output_element_tree)
+                                                  
                         # 要素2個以上で初めて出てくる場合
                         else:
-                            attribute_subelement = WM.calc_func_time(self.logger)(self.add_attribute_to_tag_in_element_dict)(attribute_split_list,
-                                                                                                                             attribute_array_list,
-                                                                                                                             all_attribute_name_list_index,
-                                                                                                                             index,
-                                                                                                                             element_dict,
-                                                                                                                             output_element_tree
-                                                                                                                             )
+                            already_element_tree\
+                                =WM.calc_func_time(self.logger)\
+                                                  (self.append_attribute_to_tag)\
+                                                  (element_dict,
+                                                   attribute_split_list,
+                                                   attribute_array_list,
+                                                   all_attribute_name_list_index,
+                                                   index,
+                                                   key_bool)
 
-                            # 追加タグの要素数チェック 属性が入っているなら追加
-                            if len(attribute_split_list[-1]) > 1:
-                                try:
-                                    # 1つ目以降の要素
-                                    value_list = attribute_split_list[-1][1:]
-
-                                    # '='でsplitして属性名と属性値に分ける
-                                    value_split_list = [value_list[spi].split(
-                                        DDC.XML_ATTRIBUTE_VALUE_DELIMITER) for spi in range(len(value_list))]
-
-                                    # 追加
-                                    [attribute_subelement.set(
-                                        value_split_list[vi][0], value_split_list[vi][1]) for vi in range(len(value_split_list))]
-
-                                except Exception:
-                                    self.logger.error(traceback.format_exc())
-                                    return FlowFileTransformResult(relationship="failure")
-
-                            else:
-                                pass
-                            # 追加対象タグ名
-                            add_target_tag_name = attribute_split_list[-1][0]
-
-                        # 特定の属性値を追加した後ジオメトリ追加
                         # -----------------------------------------------------------------------------------------------------------
                         # 地物のsubelementに対してマルチパッチの座標設定
                         # -----------------------------------------------------------------------------------------------------------
                         # 地物のsubelementに対してマルチパッチの数だけ追加
-                        if add_target_tag_name == 'frn:function':
+                        if attribute_split_list[-1][0] == 'frn:function':
 
                             feature_element, feature_subelement, element_dict = attribute_subelement = WM.calc_func_time(
                                 self.logger)(NSP.create_element)(feature_string_list, element_dict)
@@ -1062,7 +1067,7 @@ class ConvertLineStringCoordinatesToCityGML(FlowFileTransform):
                             pass
                         # -----------------------------------------------------------------------------------------------------------
 
-                        if add_target_tag_name == 'uro:administrator':
+                        if attribute_split_list[-1][0] == 'uro:administrator':
                             WM.calc_func_time(self.logger)(self.add_thematic_shape_attributes)(output_element_tree,
                                                                                                element_dict,
                                                                                                linestring_dict,

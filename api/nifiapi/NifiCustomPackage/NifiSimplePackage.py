@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@ import io
 import json
 import unicodedata
 import pathlib
+from collections import defaultdict
 
 import importlib
 
@@ -3923,3 +3924,190 @@ def add_coordinates_record_to_field_set_file_list(dwh_list,
     return dwh_list, \
         type_list, \
         value_list
+
+def convert_interiors_dict(interior_coordinates_array, interior_index_array):
+    """
+    概要
+        内周の構成点がまとめられた座標配列と、1地物に対する内周のindexがまとめられた配列を
+        Keyを地物ID、Valueを{key=1地物に対するindex:Value=[xyz],[xyz]}のdictに変換する
+
+    引数
+        interior_coordinates_array: ポリゴンの内周(穴)を[id x y (z)]にした座標配列
+        interior_index_array: 1地物に対するポリゴンの内周(穴)のindexを格納した配列(内周(穴)が2つ以上存在する為)
+
+    戻り値
+        interiors_dict: feature_index(地物ID)とポリゴンを持ったlist
+    """
+    # dict = feature_index(地物ID):{index:[xyz]}の形に定義
+    grouped_by_index_dict = defaultdict(lambda: defaultdict(list))
+
+    # 内周座標配列と、1地物に対するindexがまとめられた配列を、1行ずつdictにまとめ、interior_index_arrayが同じ値をまとめる
+    for row, interior_index in zip(interior_coordinates_array, interior_index_array):
+
+        # 地物IDを抽出
+        feature_index = row[0]
+
+        # 座標を抽出
+        xyz_list = list(row[1:])
+
+        # 地物ID:{index:[xyz]}の形にまとめる
+        grouped_by_index_dict[feature_index][interior_index].append(xyz_list)
+
+    # grouped_by_index_dictのValueのにある内周のdictのValue[xyz]を配列に変換し、listにまとめ
+    # 地物ID:内周listにまとめる
+    interiors_dict = {}
+    for feature_index, interiors in grouped_by_index_dict.items():
+
+        # 各内周座標をnumpy配列に変換
+        interiors_list = [np.array(interiors[key]) for key in interiors.keys()]
+
+        # 各feature_indexのvalueはリングのリスト（各リングはnp.array）
+        interiors_dict[feature_index] = interiors_list
+
+    return interiors_dict
+
+def convert_dict_to_hole_polygon_geometries(exterior_dict, interiors_dict):
+    """
+    概要
+        feature_index(地物ID)をKeyとした、外周、内周のdictからValueに格納された構成点を抽出し、ポリゴンに変換する
+
+    引数
+        exterior_dict: feature_index(地物ID)をKey、外周の構成点をValueに持ったdict
+        interiors_dict: feature_index(地物ID)をKey、内周の構成点をValueに持ったdict
+
+    戻り値
+        geometries_list: feature_index(地物ID)とポリゴンを持ったlist
+    """
+    # 出荷するポリゴンをまとめるためのlist
+    geometries_list = []
+
+    for feature_index, exterior_coords in exterior_dict.items():
+
+        # 内周座標の取得
+        # ※存在しなければNone
+        interiors = interiors_dict.get(feature_index)
+
+        # # 内周がまとめられているdictにfeature_indexがある場合はValueに格納した、内周を取り出す
+        # if interiors_dict is not None and feature_index in interiors_dict:
+        #     # 内周は複数穴がある場合のリスト
+        #     interiors = interiors_dict[feature_index]
+
+        # # 内周が存在しない場合はNone
+        # else:
+        #     interiors = None
+        # Polygon作成、holes=Noneでも大丈夫だった
+        poly = Polygon(shell=exterior_coords, holes=interiors)
+
+        # feature_indexをつけたのは、既存のメソッドと形式をそろえる為。
+        geometries_list.append([feature_index, poly])
+
+    return geometries_list
+
+def generate_feature_id(feature_index, coords):
+    """
+    概要
+        地物IDを構成点分作成する
+    
+    引数
+        feature_index: 地物ID(増やす対象)
+        coords: 構成点群(増やす個数)
+    
+    戻り値
+        id_array: 構成点分増やされた地物ID
+    """
+    id_array = np.array([feature_index] * len(coords))
+
+    return id_array
+
+def get_geometry_points_numpy_polygon(target_polygon_geometries_list):
+    """
+    概要
+        ポリゴンが格納されたlistから[id x y (z)]の二次元配列を作成する関数
+    
+    引数
+        target_polygon_geometries_list:  ポリゴンが格納されたlist
+                                         ※ほかの種類のジオメトリや、マルチポリゴンは認めない。
+    
+    戻り値
+        exterior_coordinates_array: ポリゴンの外周の構成点を[id x y (z)]にした座標配列
+        interior_coordinates_array: ポリゴンの内周(穴)を[id x y (z)]にした座標配列
+                                    ※idは外周と同じものとする。
+        interior_index_array: 1地物に対するポリゴンの内周(穴)のindexを格納した配列(内周(穴)が2つ以上存在する為)
+    """
+
+    # 外周の構成点配列を格納するlist
+    exterior_list = []
+    # 外周の地物IDを格納するlist
+    exterior_feature_id_list = []
+
+    # 内周の構成点配列を格納するlist
+    interior_list = []
+    # 内周の地物IDを格納するlist
+    interior_feature_id_list = []
+
+    # 1地物に対する内周のindexを格納するlist
+    interior_only_index_list = []
+
+    # 地物数(for文の数)
+    max_count_range = range(len(target_polygon_geometries_list))
+
+    for feature_index in max_count_range:
+        geom = target_polygon_geometries_list[feature_index]
+        if geom.is_empty:
+            continue
+
+        # --- 外周の座標を取得 ---
+        exterior_coords_array = np.array(get_geometry_points_list(geom.exterior.coords), dtype=np.float64)
+        exterior_list.extend(exterior_coords_array.copy())
+
+        # 地物IDだけの配列を作成
+        exterior_id_array = generate_feature_id(feature_index, exterior_coords_array)
+        exterior_feature_id_list.extend(exterior_id_array.copy())
+
+        # --- 内周の座標を取得 ---
+        for interior_index, interior in enumerate(geom.interiors):
+            interior_coords_array = np.array(get_geometry_points_list(interior.coords), dtype=np.float64)
+            interior_list.extend(interior_coords_array.copy())
+
+            # 地物IDだけの配列を作成
+            interior_id_array = generate_feature_id(feature_index, interior_coords_array)
+            interior_feature_id_list.extend(interior_id_array.copy())
+
+            # 1地物に対する内周のindexを格納するlist
+            interior_with_inter_index_array = generate_feature_id(interior_index, interior_coords_array)
+            interior_only_index_list.extend(interior_with_inter_index_array.copy())
+
+    # 外周座標が格納されたlistを配列に変換
+    exterior_array = np.array(exterior_list, dtype=np.float64).copy()
+    # 外周座標に対応する地物IDが格納されたlistを配列に変換し、二次元配列にする
+    exterior_feature_id_array = np.array(exterior_feature_id_list, dtype=np.float64).reshape(-1, 1)  # ★ reshape
+
+    # 地物IDx,y,(z)の形にするために結合
+    exterior_coordinates_array = np.concatenate([exterior_feature_id_array, exterior_array], axis=1)
+
+    # 内周座標が格納されたlistを配列に変換
+    interior_array = np.array(interior_list, dtype=np.float64)
+    # 内周座標に対応する地物IDが格納されたlistを配列に変換し、2次元配列にする
+    interior_feature_id_array = np.array(interior_feature_id_list, dtype=np.float64).reshape(-1, 1)  # ★ reshape
+
+    # 内周のポリゴンがある場合は、結合
+    if interior_feature_id_array.size > 0:
+        interior_coordinates_array = np.concatenate(
+            [interior_feature_id_array, interior_array], axis=1)
+    
+    # 内周のポリゴンがなかった場合は空の配列を作成
+    else:
+        interior_coordinates_array = np.empty(0)
+
+    # 1地物に対する内周のindexを格納するlistを配列に変換する
+    interior_index_array = np.array(interior_only_index_list, dtype=np.float64)
+
+    return exterior_coordinates_array, interior_coordinates_array, interior_index_array
+
+def get_value_from_field_set_file_dataframe(field_set_file_dataframe, dwh_name):
+
+    # field_set_file_dataframe から指定したDWHをもった行のValue列を取得
+    target_value = pickle.loads(base64.b64decode(
+        field_set_file_dataframe.loc[field_set_file_dataframe["Dwh"] == dwh_name, "Value"].values[0]))
+
+    return target_value

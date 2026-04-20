@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +64,7 @@ class ConvertGeoJSONToGeoDataFrame(FlowFileTransform):
         name='GeoJSON File Encode',
         description='GeoJSONの文字コード',
         default_value='shift-jis',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -73,7 +74,7 @@ class ConvertGeoJSONToGeoDataFrame(FlowFileTransform):
         name='GeoJSON File CRS',
         description='GeoJSONのCRS(epsgコード)',
         default_value='6677',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )

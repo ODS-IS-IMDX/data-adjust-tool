@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,13 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Python標準ライブラリ
+import numpy
 from collections import Counter
-from importlib import import_module
-
-# 外部ライブラリの動的インポート
-np = import_module("numpy")
-LineString = getattr(import_module("shapely.geometry"), "LineString")
+from shapely.geometry import LineString
 
 from cad.common.cad_base_validate_processor import CadBaseValidateProcessor
 from common.error_code_list import ErrorCodeList
@@ -76,7 +72,7 @@ class ValidateCreatePolygonsFromLineStrings(CadBaseValidateProcessor):
 
             # Valueがndarrayであることをチェック
             geom_list = check_df["Value"].values.tolist()[0]
-            if not self.validate_data_types(geom_list, np.ndarray):
+            if not self.validate_data_types(geom_list, numpy.ndarray):
                 return self.RESULT_FAILURE
 
             # GeoNdarray形式かどうかチェック

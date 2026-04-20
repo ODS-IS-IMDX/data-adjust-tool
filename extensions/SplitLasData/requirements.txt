@@ -1,0 +1,6 @@
+laspy==2.6.1
+numpy== 1.26.4
+numba == 0.59.1
+pandas==2.2.1
+pyproj==3.6.1
+pillow==10.4.0

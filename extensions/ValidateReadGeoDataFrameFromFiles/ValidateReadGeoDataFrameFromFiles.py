@@ -1,17 +1,17 @@
 # MIT License
-#
-# Copyright (c) 2025 NTT InfraNet
-#
+# 
+# Copyright (c) 2025,2026 NTT InfraNet
+# 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-#
+# 
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-#
+# 
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,17 +23,14 @@
 # Python標準モジュール
 import io
 
-from importlib import import_module
-
 # Nifiライブラリ
 from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope
 from data_processing.common.data_processing_base_validate_processor import DataProcessingBaseValidateProcessor
 
-from common.error_code_list import ErrorCodeList
+import nifiapi.NifiCustomPackage.DataDistributionConstant as DDC
+import nifiapi.NifiCustomPackage.NifiSimplePackage as NSP
 
-# 外部ライブラリの動的インポート
-pd = import_module("pandas")
-gpd = import_module("geopandas")
+from common.error_code_list import ErrorCodeList
 
 
 class ValidateReadGeoDataFrameFromFiles(DataProcessingBaseValidateProcessor):
@@ -43,23 +40,32 @@ class ValidateReadGeoDataFrameFromFiles(DataProcessingBaseValidateProcessor):
     class ProcessorDetails:
         version = "1.0.0"
         description = """
-                        ReadGeoDataFrameFromFilesで必要なデータを持っているか、プロパティで指定したCSVが正しいか検証。
+                        ReadGeoDataFrameFromFilesで必要なデータを持っているか、プロパティで指定したエンコードが正しいか検証。
                       """
         tags = ["Validate", "Python"]
 
-    # GeoDataframeに設定するオプションCSV
-    INPUT_OPTION_CSV = PropertyDescriptor(
-        name="Input Option CSV",
-        description="""GeoDataframeに設定するオプション（CSV形式）。
-                      ※GeoPandasライブラリのread_fileメソッドで用いるオプションを指定
-                    """,
+    # 入荷対象ファイルのEncoding
+    INPUT_ENCODING = PropertyDescriptor(
+        name="Input Encoding",
+        description="入荷対象ファイルのEncoding",
         expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
-        default_value="OPTION,VALUE",
-        sensitive=False,
-        required=True
+        default_value='utf-8',
+        required=True,
+        sensitive=False
     )
 
-    property_descriptors = [INPUT_OPTION_CSV]
+    # 入荷対象ファイルの拡張子
+    INPUT_EXTENSION = PropertyDescriptor(
+        name="Input Extension",
+        description="入荷対象ファイルの拡張子",
+        allowable_values=DDC.INPUT_FILE_EXTENSION_LIST,
+        expression_language_scope=ExpressionLanguageScope.NONE,
+        required=True,
+        sensitive=False
+    )
+
+    property_descriptors = [INPUT_ENCODING,
+                            INPUT_EXTENSION]
 
     def getPropertyDescriptors(self):
         parent_properties = super().getPropertyDescriptors()
@@ -84,129 +90,44 @@ class ValidateReadGeoDataFrameFromFiles(DataProcessingBaseValidateProcessor):
             # インプットデータ取得
             input_data = flowfile.getContentsAsBytes()
 
-            # flowfileのデータをfile_objectへ変換(※exec_read_code部分で使用)
-            input_stream = io.BytesIO(input_data)
-
             # --------------------------------------------------------------------------
             # データの空検証
             # --------------------------------------------------------------------------
             if not self.validate_empty_data(input_data):
                 return self.RESULT_FAILURE
 
-            # オプション指定用CSV取得
-            input_option_csv\
-                = context.getProperty(self.INPUT_OPTION_CSV).evaluateAttributeExpressions(flowfile).getValue()
+            # flowfileのデータをfile_objectへ変換
+            input_stream = io.BytesIO(input_data)
 
-            input_option_stream = io.StringIO(input_option_csv)
+            # 入荷対象ファイルのEncoding
+            input_encoding\
+                = context.getProperty(self.INPUT_ENCODING).evaluateAttributeExpressions(flowfile).getValue()
 
-            # --------------------------------------------------------------------------
-            # GeoDataframeに設定するオプションCSVの検証
-            # --------------------------------------------------------------------------
+            # 入荷対象ファイルの拡張子
+            input_extension\
+                = context.getProperty(self.INPUT_EXTENSION).evaluateAttributeExpressions(flowfile).getValue()
+
             try:
-                # GeoPandasに設定するオプションを取得
-                input_option_dataframe = pd.read_csv(
-                    input_option_stream, quoting=3)
-
-            except pd.errors.ParserError as e:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00079)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            except pd.errors.EmptyDataError as e:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00034)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            except SyntaxError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00033)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            # --------------------------------------------------------------------------
-            # input_option_dataframe に"OPTION"・"VALUE"カラムが存在するかの検証
-            # --------------------------------------------------------------------------
-            try:
-                option_list = input_option_dataframe["OPTION"].to_list()
-                value_list = input_option_dataframe["VALUE"].to_list()
-
-            except KeyError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00034)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            # --------------------------------------------------------------------------
-            # オプションにcrsが存在した場合指定したCRSが正しいか検証
-            # --------------------------------------------------------------------------
-            for option, value in zip(option_list, value_list):
-                if option == "crs":
-                    if not self.check_epsg(value):
-                        result = False
-                        if self.mode_value == self.MODE_STOP:
-                            return self.RESULT_FAILURE
-                    break
-
-            # 必須のファイルパスを引数に設定
-            exec_read_code\
-                = 'target_gdf = gpd.read_file(input_stream'
-
-            # オプションの文字列を結合
-            for i in range(len(option_list)):
-
-                option_code\
-                    = ', {} = {}'.format(option_list[i],
-                                         value_list[i])
-                exec_read_code = exec_read_code+option_code
-
-            # カッコで閉じる
-            exec_read_code = exec_read_code+')'
-
-            global_vars = globals().copy()
-            local_vars = locals()
-
-            # --------------------------------------------------------------------------
-            # GeoDataframeに変換できるかの検証
-            # --------------------------------------------------------------------------
-            try:
-                # コードの実行
-                exec(exec_read_code, global_vars, local_vars)
-
-            except SyntaxError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00033)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            except NameError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00080)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
+                geodataframe\
+                    = NSP.get_geodataframe_from_datasource(input_stream,
+                                                           input_encoding,
+                                                           extension=input_extension)
 
             except UnicodeDecodeError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.EC00007)
+                args = {"error_code": ErrorCodeList.EC00007,
+                        "Input Encoding": str(input_encoding)}
+                self.validate_logger.write_log(**args)
                 result = False
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE
 
             except LookupError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.EC00007)
+                args = {"error_code": ErrorCodeList.EC00007,
+                        "Input Encoding": str(input_encoding)}
+                self.validate_logger.write_log(**args)
                 result = False
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE
-
-            geodataframe = local_vars['target_gdf']
 
             if not self.validate_gdf_shape(geodataframe, data_name="GeoDataFrame"):
                 result = False

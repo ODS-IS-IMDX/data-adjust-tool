@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -759,7 +759,7 @@ class ConvertMultiPointCoordinatesToCityGML(FlowFileTransform):
             # 【取得】データ定義ファイルに指定された属性項目ファイルをすべて読み込み一つのDataFrameとする
             # -----------------------------------------------------------------------------------------------------------
             attribute_feature_id_array, \
-                all_attribute_dataframe\
+            all_attribute_dataframe\
                 = WM.calc_func_time(self.logger)(NSP.create_attribute_dataframe_datatype)(field_set_file_data_frame,
                                                                                           attribute_dwh_file_name_list,
                                                                                           attribute_distribution_name_list,

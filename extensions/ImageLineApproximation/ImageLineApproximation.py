@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025, 2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -116,8 +116,15 @@ class ImageLineApproximation(BaseProcessor):
     - コーナー毎に円を描画して管路を分離します。
     - 円のサイズが小さいと管路がうまく分離できず、大きいと管路がうまく取得できない場合があります。
     - 円のサイズが小さいとL字のコーナーの結果が\のようになります。(コーナーで分離できず始点と終点を直線でつなぐため。)
-    - 円のサイズが大きいとL字のコーナーが分離できても分離後の直線が実際よりも短くなる場合があります。(分離するための円によって元の線が消されるため。)
-    - 初期値は 4 です。
+    - 円のサイズが大きいとL字のコーナーが分離できても分離後の直線が実際よりも短くなる場合があります。(分離するための円によって元の線が消されるため。)    - 初期値は 4 です。
+
+    **Min Area**
+
+    **任意入力  直接入力**
+
+    - ラベリングで分離した領域のうち、面積(画素数)がこの値未満の領域は除外します。
+    - 小さすぎる領域(ノイズ)を除外するための値です。
+    - 初期値は 1 です。
 
     **Measure line thickness**
 
@@ -256,6 +263,17 @@ class ImageLineApproximation(BaseProcessor):
         sensitive=False
     )
 
+    min_area = PropertyDescriptor(
+        name="Min Area",
+        description="ラベリングで分離した領域のうち、面積(画素数)がこの値未満の領域は除外します。\
+                    小さすぎる領域(ノイズ)を除外するための値です。\
+                    初期値は 10 です。",
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
+        required=False,
+        default_value="10",
+        sensitive=False
+    )
+
     is_measure_thickness = PropertyDescriptor(
         name="Measure line thickness",
         description="Trueの場合、線の検出と同時に線の太さも検出します。\
@@ -315,6 +333,7 @@ class ImageLineApproximation(BaseProcessor):
                             min_distance,
                             block_size,
                             circle_size,
+                            min_area,
                             is_measure_thickness,
                             line_thickness_threshold,
                             fsf_image_src,

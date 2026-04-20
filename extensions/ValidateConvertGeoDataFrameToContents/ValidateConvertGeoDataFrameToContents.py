@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,16 +22,13 @@
 
 # Python標準モジュール
 import pickle
-import io
 
 # Nifiライブラリ
 from data_processing.common.data_processing_base_validate_processor import DataProcessingBaseValidateProcessor
 from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope
 from common.error_code_list import ErrorCodeList
 
-# 外部モジュール
-from importlib import import_module
-pd = import_module("pandas")
+import nifiapi.NifiCustomPackage.DataDistributionConstant as DDC
 
 
 class ValidateConvertGeoDataFrameToContents(DataProcessingBaseValidateProcessor):
@@ -45,19 +42,28 @@ class ValidateConvertGeoDataFrameToContents(DataProcessingBaseValidateProcessor)
                       """
         tags = ["Validate", "Python"]
 
-    # GeoDataFrameに設定するオプションCSV
-    OUTPUT_OPTION_CSV = PropertyDescriptor(
-        name="Output Option CSV",
-        description="""GeoDataFrameに設定するオプション（CSV形式）。
-                      ※GeoPandasライブラリのto_fileメソッドで用いるオプションを指定
-                    """,
-        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
-        default_value="OPTION,VALUE",
+    # 出力ファイルのEncoding
+    OUTPUT_FILE_ENCODING = PropertyDescriptor(
+        name="output file encoding",
+        description="出力ファイルのEncoding",
+        default_value='utf-8',
+        required=True,
         sensitive=False,
-        required=True
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES
     )
 
-    property_descriptors = [OUTPUT_OPTION_CSV]
+    # 出力ファイルの拡張子
+    OUTPUT_FILE_EXTENSION = PropertyDescriptor(
+        name="output file extension",
+        description="出力ファイルの拡張子",
+        allowable_values=DDC.OUTPUT_FILE_EXTENSION_LIST,
+        sensitive=False,
+        required=True,
+        expression_language_scope=ExpressionLanguageScope.NONE
+    )
+
+    property_descriptors = [OUTPUT_FILE_ENCODING,
+                            OUTPUT_FILE_EXTENSION]
 
     def getPropertyDescriptors(self):
         parent_properties = super().getPropertyDescriptors()
@@ -79,17 +85,27 @@ class ValidateConvertGeoDataFrameToContents(DataProcessingBaseValidateProcessor)
 
             result = True
 
-            # GeoDataFrameに設定するオプションCSVを取得
-            output_option_csv\
-                = context.getProperty(self.OUTPUT_OPTION_CSV).evaluateAttributeExpressions(flowfile).getValue()
+            # 出力ファイルのEncoding
+            output_file_encoding\
+                = context.getProperty(self.OUTPUT_FILE_ENCODING).evaluateAttributeExpressions(flowfile).getValue()
 
-            # 空文字の場合はエラーコード(CSV形式ではない)を返す。
-            if output_option_csv in (None, ""):
+            # 出力ファイルの拡張子
+            output_file_extension\
+                = context.getProperty(self.OUTPUT_FILE_EXTENSION).evaluateAttributeExpressions(flowfile).getValue()
+
+            layer_name = flowfile.getAttribute(DDC.GPKG_ARGS)
+
+            # --------------------------------------------------------------------------
+            # layer_nameが存在するか検証
+            # --------------------------------------------------------------------------
+            if not layer_name or layer_name == "":
                 self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00033)
+                    error_code=ErrorCodeList.ED00061)
                 result = False
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE
+            else:
+                pass
 
             # インプットデータ取得
             input_data = flowfile.getContentsAsBytes()
@@ -121,101 +137,26 @@ class ValidateConvertGeoDataFrameToContents(DataProcessingBaseValidateProcessor)
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE
 
-            try:
-                # GeoPandasに設定するオプションを取得
-                output_option_dataframe = pd.read_csv(
-                    io.StringIO(output_option_csv), quoting=3)
-
-            except pd.errors.ParserError as e:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00079)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            except SyntaxError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00033)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
+            # --------------------------------------------------------------------------
+            # GeoDataFrameのカラム名に"FID"が含まれていないか検証
+            # --------------------------------------------------------------------------
+            if output_file_extension == ".gpkg":
+                columns = geodataframe.columns.str.lower()
+                if 'fid' in columns:
+                    # FIDが見つかった場合、エラーコードED00075を出力
+                    self.validate_logger.write_log(
+                        error_code=ErrorCodeList.ED00076)
+                    result = False
+                    if self.mode_value == self.MODE_STOP:
+                        return self.RESULT_FAILURE
 
             # --------------------------------------------------------------------------
-            # output_option_dataframe に"OPTION"・"VALUE"カラムが存在するかの検証
+            # GeoDataFrameをcsv,geojson,gpkgに変換できるか検証
             # --------------------------------------------------------------------------
-            try:
-                option_list = output_option_dataframe["OPTION"].to_list()
-                value_list = output_option_dataframe["VALUE"].to_list()
-
-            except KeyError:
-                self.validate_logger.write_log(
-                    error_code=ErrorCodeList.ED00034)
-                result = False
-                if self.mode_value == self.MODE_STOP:
-                    return self.RESULT_FAILURE
-
-            # OPTION列にdriverがなければエラー
-            if "driver" in option_list:
-                pass
-            else:
-                self.logger.error('driverを設定してください')
-                return self.RESULT_FAILURE
-
-            temp_object = io.BytesIO()
-
-            #driver取得
-            driver_index=option_list.index('driver')
-            driver_string=value_list[driver_index]
-
-            #CSVの場合 to_csvのメソッド使用
-            if len(driver_string)==5 and driver_string[1:4]=='CSV':
-
-                exec_read_code\
-                    ='result = geodataframe.to_csv(temp_object'
-
-                #オプションの文字列を結合
-                for i in range(len(option_list)):
-
-                    if option_list[i]=='driver':
-                        continue
-                    else:
-                        pass
-                    option_code\
-                        =', {} = {}'.format(option_list[i],
-                                            value_list[i])
-                    exec_read_code=exec_read_code+option_code
-
-            else:
-
-                exec_read_code\
-                    ='result = geodataframe.to_file(temp_object'
-
-                # オプションの文字列を結合
-                for i in range(len(option_list)):
-
-                    option_code\
-                        =', {} = {}'.format(option_list[i],
-                                            value_list[i])
-                    exec_read_code=exec_read_code+option_code
-
-            # カッコで閉じる
-            exec_read_code=exec_read_code+')'
-
-
-            global_vars = globals().copy()
-            local_vars = locals()
-
-            try:
-                # コードの実行
-                exec(exec_read_code, global_vars, local_vars)
-
-            # 作成できない場合はプロパティに問題がある為、エラーコードを返す
-            except Exception:
-                args = {
-                    "error_code": ErrorCodeList.ED00081,
-                    "対象プロパティ": "Output Option CSV"
-                }
-                self.validate_logger.write_log(**args)
+            if not self.validate_geodataframe_conversion(geodataframe,
+                                                         output_file_extension,
+                                                         output_file_encoding,
+                                                         layer_name):
                 result = False
                 if self.mode_value == self.MODE_STOP:
                     return self.RESULT_FAILURE

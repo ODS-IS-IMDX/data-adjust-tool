@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,6 @@
 # Python標準ライブラリ
 import pickle
 import traceback
-import base64
 from io import StringIO
 
 from importlib import import_module
@@ -36,6 +35,7 @@ from importlib import import_module
 # NiFi自作ライブラリ
 import nifiapi.NifiCustomPackage.DataDistributionConstant as DDC
 import nifiapi.NifiCustomPackage.NifiSimplePackage as NSP
+import nifiapi.NifiCustomPackage.NifiComplicationPackage as NCP
 import nifiapi.NifiCustomPackage.WrapperModule as WM
 
 # NiFiライブラリ
@@ -46,6 +46,8 @@ from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope
 np = import_module("numpy")
 pd = import_module("pandas")
 gpd = import_module("geopandas")
+Polygon = import_module("shapely").geometry.Polygon
+MultiPolygon = import_module("shapely").geometry.MultiPolygon
 
 
 class ConvertFieldSetFileToGeoDataFrame(FlowFileTransform):
@@ -82,8 +84,26 @@ class ConvertFieldSetFileToGeoDataFrame(FlowFileTransform):
         required=True
     )
 
+    POLYGON_INTERIOR_DISTRIBUTION_NAME = PropertyDescriptor(
+        name="Polygon Interior Distribution Name",
+        description="ポリゴンの内周座標配列の流通項目名",
+        expression_language_scope=ExpressionLanguageScope.NONE,
+        required=False,
+        sensitive=False
+    )
+
+    POLYGON_INTERIOR_INDEX_DISTRIBUTION_NAME = PropertyDescriptor(
+        name="Polygon Interior Index Distribution Name",
+        description="ポリゴンの内周Index配列の流通項目名",
+        expression_language_scope=ExpressionLanguageScope.NONE,
+        required=False,
+        sensitive=False
+    )
+
     property_descriptors = [CRS,
-                            DATA_DEFINITION_DELIMITER]
+                            DATA_DEFINITION_DELIMITER,
+                            POLYGON_INTERIOR_DISTRIBUTION_NAME,
+                            POLYGON_INTERIOR_INDEX_DISTRIBUTION_NAME]
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -111,7 +131,15 @@ class ConvertFieldSetFileToGeoDataFrame(FlowFileTransform):
         data_definition_delimiter = context.getProperty(
             self.DATA_DEFINITION_DELIMITER).getValue()
 
-        return crs, data_definition_delimiter
+        # 内周座標配列取得用流通項目名
+        polygon_interior_distribution_name= context.getProperty(
+            self.POLYGON_INTERIOR_DISTRIBUTION_NAME).getValue()
+
+        # 内周index配列取得用流通項目名
+        polygon_interior_index_distribution_name = context.getProperty(
+            self.POLYGON_INTERIOR_INDEX_DISTRIBUTION_NAME).getValue()
+
+        return crs, data_definition_delimiter, polygon_interior_distribution_name, polygon_interior_index_distribution_name
 
     def get_flowfile(self, flowfile):
         """
@@ -138,34 +166,17 @@ class ConvertFieldSetFileToGeoDataFrame(FlowFileTransform):
 
         return data_definition_stream, field_set_file_data_frame
 
-    def extract_coordinates_array_from_field_set_file(self, field_set_file_data_frame, geometry_file_name_list):
-        """
-        概要:
-            field_set_file_data_frameのDwh列で、geometry_file_name_listの0番目(geometryのDWH)の値の行とValue列の値を抽出し
-            base64でデコード、デシリアライズし配列に戻す関数
-        引数:
-            field_set_file_data_frame: field_set_fileをデータフレームに加工した物
-            geometry_file_name_list: データ定義ファイル内のgeometryのDwhファイル名が格納されているリスト(基本要素は1つ)
-        戻り値:
-            geometry_value_coordinates_array: 座標配列
-        """
-        # Value列且つ、Dwh列の値がgeometry_file_name_listのインデックスが0番目
-        geometry_value_coordinates_array = pickle.loads(base64.b64decode(
-            field_set_file_data_frame.loc[field_set_file_data_frame["Dwh"] == geometry_file_name_list[0], "Value"].values[0]))
-
-        return geometry_value_coordinates_array
-
     def convert_target_data_to_geodataframe(self,
                                             all_attribute_dataframe,
                                             geometry_value_coordinates_array,
                                             crs):
         """
         概要
-            all_attribute_dataframeとgeometry_value_coordinates_arrayからGeoDataFrameを作成する関数
+            属性のDataFrameと座標のnumpy配列からGeoDataFrameを作成する関数
         引数:
             all_attribute_dataframe: 出力対象属性をすべて含むデータフレーム
-            geometry_value_coordinates_array: 座標配列
-            crs: 出力するシェープファイルのCRS
+            geometry_value_coordinates_array: Shapelyオブジェクト配列
+            crs: 出力するGeoDataFrameのCRS
         戻り値:
             GeoDataFrame
         """
@@ -175,12 +186,45 @@ class ConvertFieldSetFileToGeoDataFrame(FlowFileTransform):
                                         crs=crs)
         return geodataframe
 
+    def get_coordinates_multipolygon_shapely_array(self, coordinates_array):
+        
+        coordinates_shapely_list=[]
+        
+        #si,ei取得
+        si,ei=NCP.get_start_index_and_end_index(coordinates_array)
+
+        #地物ごとにループ
+        for i in range(len(si)):
+            
+            
+            polygon_list=[]
+            #ポリゴンを構成する座標数
+            POLYGON_COORDINATES_COUNTS=4
+            
+            #地物取り出す
+            temp_array=coordinates_array[si[i]:ei[i]+1,1:][:, :3]
+            
+            #三角形の枚数＞４点＞xyz座標に変換
+            temp_array=temp_array.reshape((int(temp_array.shape[0]/4),
+                                        POLYGON_COORDINATES_COUNTS,
+                                        temp_array.shape[1]))
+            
+            
+            polygon_list=[Polygon(temp_array[ti]) for ti in range(len(temp_array))]
+            
+            coordinates_shapely_list.append(MultiPolygon(polygon_list))
+
+        return coordinates_shapely_list
+
     def transform(self, context, flowfile):
         try:
             # -----------------------------------------------------------------------------------------------------------
             # 【取得】フローファイルからFieldSetFileとプロパティの設定値と製品データ定義ファイルを取得
             # -----------------------------------------------------------------------------------------------------------
-            crs, data_definition_delimiter\
+            crs, \
+                data_definition_delimiter, \
+                polygon_interior_distribution_name, \
+                polygon_interior_index_distribution_name\
                 = WM.calc_func_time(self.logger)(self.get_property)(context, flowfile)
 
             data_definition_stream, field_set_file_data_frame = WM.calc_func_time(
@@ -198,34 +242,91 @@ class ConvertFieldSetFileToGeoDataFrame(FlowFileTransform):
                 attribute_file_type_list, \
                 all_attribute_name_list, \
                 all_dwh_file_name_list\
-                = WM.calc_func_time(self.logger)(NSP.get_data_definition_index)(data_definition_stream, data_definition_delimiter=data_definition_delimiter
+                = WM.calc_func_time(self.logger)(NSP.get_data_definition_index)(data_definition_stream,
+                                                                                data_definition_delimiter=data_definition_delimiter
                                                                                 )
 
-            # -----------------------------------------------------------------------------------------------------------
-            # 【取得】field_set_file_data_frameから、座標配列を抽出。
-            # -----------------------------------------------------------------------------------------------------------
-            geometry_value_coordinates_array = WM.calc_func_time(self.logger)(
-                self.extract_coordinates_array_from_field_set_file)(field_set_file_data_frame, geometry_file_name_list)
+            # 座標配列が1行の場合
+            if len(geometry_distribution_name_list) == 1:
+
+                # -----------------------------------------------------------------------------------------------------------
+                # 【取得】field_set_file_data_frameから、座標配列を抽出。
+                # -----------------------------------------------------------------------------------------------------------
+                geometry_value_coordinates_array = WM.calc_func_time(self.logger)(
+                    NSP.get_value_from_field_set_file_dataframe)(field_set_file_data_frame, geometry_file_name_list[0])
+
+                # -----------------------------------------------------------------------------------------------------------
+                # 【取得】ジオメトリファイルを読み込みnumpy配列を取得
+                # -----------------------------------------------------------------------------------------------------------
+
+                # マルチパッチの場合
+                if geometry_value_coordinates_array.shape[1] == 8:
+                    coordinates_shapely_array = self.get_coordinates_multipolygon_shapely_array(geometry_value_coordinates_array)
+
+                # マルチパッチ以外の場合
+                else:
+                    coordinates_shapely_array = WM.calc_func_time(self.logger)(NSP.get_attribute_coordinates_by_geometry_items)(geometry_value_coordinates_array,
+                                                                                                                                geometry_type_list[0]
+                                                                                                                                )
+
+            # 内周座標配列、内周index配列も入力されていた場合。
+            else:
+                # データ定義ファイルの流通項目名列の中で、プロパティで指定した値を内周座標配列又は、内周index配列とする
+                for i in range(len(geometry_distribution_name_list)):
+
+                    # 内周座標配列のをFieldSetFileから抽出する
+                    if geometry_distribution_name_list[i] == polygon_interior_distribution_name:
+                        polygon_interior_coordinates_array = WM.calc_func_time(self.logger)(
+                            NSP.get_value_from_field_set_file_dataframe)(field_set_file_data_frame,
+                                                                                geometry_file_name_list[i])
+
+                    # 内周index配列のをFieldSetFileから抽出する
+                    elif geometry_distribution_name_list[i] == polygon_interior_index_distribution_name:
+                        polygon_interior_index_array = WM.calc_func_time(self.logger)(
+                            NSP.get_value_from_field_set_file_dataframe)(field_set_file_data_frame,
+                                                                                geometry_file_name_list[i])
+
+                    # 内周座標配列でも、内周index配列でもなければ、外周座標配列とする
+                    else:
+                        geometry_value_coordinates_array = WM.calc_func_time(self.logger)(
+                            NSP.get_value_from_field_set_file_dataframe)(field_set_file_data_frame,
+                                                                                geometry_file_name_list[i])
+
+                # 内周座標配列の構成点を地物IDごとにまとめる
+                interiors_dict =  WM.calc_func_time(self.logger)(
+                    NSP.convert_interiors_dict)(polygon_interior_coordinates_array, polygon_interior_index_array)
+
+                # 外周座標配列の構成点を地物IDごとにまとめる
+                exterior_dict =  WM.calc_func_time(self.logger)(
+                    NSP.split_geometry_points_dict)(geometry_value_coordinates_array[:, :4])
+
+                # 地物IDごとにまとめられた構成点をShapelyに変換する
+                geometry_list =  WM.calc_func_time(self.logger)(
+                    NSP.convert_dict_to_hole_polygon_geometries)(exterior_dict, interiors_dict)
+
+                # 各listの1つ目の要素の地物IDを除く為に、配列に変換する
+                coordinates_shapely_array = np.array(geometry_list)[:, 1]
 
             # -----------------------------------------------------------------------------------------------------------
             # 【取得】製品データ定義ファイルに指定された属性項目ファイルをすべて読み込み一つのDataFrameとする
             # -----------------------------------------------------------------------------------------------------------
-            all_attribute_dataframe = WM.calc_func_time(self.logger)(NSP.create_attribute_dataframe)(field_set_file_data_frame, dwh_file_name_list, attribute_name_list, attribute_const_value_list, attribute_file_type_list, len(np.unique(geometry_value_coordinates_array[:, 0])), encoding="UTF-8", input_file_type=1
+            all_attribute_dataframe = WM.calc_func_time(self.logger)(NSP.create_attribute_dataframe)(field_set_file_data_frame,
+                                                                                                     dwh_file_name_list,
+                                                                                                     attribute_name_list,
+                                                                                                     attribute_const_value_list,
+                                                                                                     attribute_file_type_list,
+                                                                                                     len(np.unique(geometry_value_coordinates_array[:, 0])),
+                                                                                                     encoding="UTF-8",
+                                                                                                     input_file_type=1
                                                                                                      )
 
             # -----------------------------------------------------------------------------------------------------------
-            # 【取得】ジオメトリファイルを読み込みnumpy配列を取得
+            # 【取得】属性のDataFrameと座標のnumpy配列からGeoDataFrameを作成する
             # -----------------------------------------------------------------------------------------------------------
-            coordinates_shapely_array = WM.calc_func_time(self.logger)(NSP.get_attribute_coordinates_by_geometry_items)(geometry_value_coordinates_array, geometry_type_list[0]
-                                                                                                                        )
 
-            # -----------------------------------------------------------------------------------------------------------
-            # 【取得】属性のDataFrameと座標のnumpy配列からGeoJSONの文字列データを作成し、整形
-            # -----------------------------------------------------------------------------------------------------------
-            geodataframe \
-                = WM.calc_func_time(self.logger)(self.convert_target_data_to_geodataframe)(all_attribute_dataframe,
-                                                                                           coordinates_shapely_array,
-                                                                                           crs)
+            geodataframe = gpd.GeoDataFrame(all_attribute_dataframe,
+                                            geometry=coordinates_shapely_array,
+                                            crs=crs)
 
             return FlowFileTransformResult(relationship="success",
                                            contents=pickle.dumps(geodataframe))

@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025, 2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -99,6 +99,9 @@ class ImageLineApproximationLogic(FlexibleRasterVectorLogic):
             - circle_size : int
                 コーナー毎に円を描画して管路を分離する際の円のサイズが設定されます。
 
+            - min_area : int
+                ラベリングで分離した領域のうち、面積(画素数)がこの値未満の領域は除外します。
+
             - is_measure_thickness : bool
                 線の検出と同時に線の太さも検出するフラグが設定されます。
 
@@ -169,6 +172,7 @@ class ImageLineApproximationLogic(FlexibleRasterVectorLogic):
             min_distance = int(properties.get('min_distance', 5))
             block_size = int(properties.get('block_size', 5))
             circle_size = int(properties.get('circle_size', 4))
+            min_area = int(properties.get('min_area', 1))
             line_thickness_threshold = int(properties.get('line_thickness_threshold', 200))
         except Exception as e:
             raise ValueError(f'プロパティの取得時にエラーが発生しました: {e}')
@@ -188,6 +192,9 @@ class ImageLineApproximationLogic(FlexibleRasterVectorLogic):
         # コーナーで分離する際の円のサイズ
         if not (0 < circle_size):
             raise ValueError("circle_sizeは0より大きい必要があります")
+        # ラベリングで分離した領域の最小面積
+        if not (0 <= min_area):
+            raise ValueError("min_areaは0以上である必要があります")
 
         if not (line_thickness_threshold in range(0, 256)):
             raise ValueError("line_thickness_thresholdは0 ~ 255の範囲で指定する必要があります")
@@ -216,10 +223,10 @@ class ImageLineApproximationLogic(FlexibleRasterVectorLogic):
         _, labels, stats, _ = cv2.connectedComponentsWithStats(image_pad)
 
         points_data = np.array([], dtype=np.int32)
-        area = 10
+        area = min_area
         # ラベルごとに処理
         for label_index in range(labels.max() + 1):
-            # 背景と面積が10以下の領域は除く
+            # 背景と面積が指定値未満の領域は除く
             if label_index == 0 or stats[label_index][4] < area:
                 continue
             
@@ -286,4 +293,3 @@ class ImageLineApproximationLogic(FlexibleRasterVectorLogic):
             new_byte_data = pickle.dumps(pixel_lines)
 
         return new_byte_data, attribute
-

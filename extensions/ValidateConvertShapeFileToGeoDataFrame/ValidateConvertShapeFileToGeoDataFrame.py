@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +60,7 @@ class ValidateConvertShapeFileToGeoDataFrame(DataProcessingBaseValidateProcessor
         name='Shapefile Encode',
         description='Shapeファイルの文字コード',
         default_value='shift-jis',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -69,7 +70,7 @@ class ValidateConvertShapeFileToGeoDataFrame(DataProcessingBaseValidateProcessor
         name='Shapefile CRS',
         description='シェープファイルのCRS(epsgコード)',
         default_value='6677',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -78,7 +79,7 @@ class ValidateConvertShapeFileToGeoDataFrame(DataProcessingBaseValidateProcessor
     X_OFFSET = PropertyDescriptor(
         name='Latitude(X) Offset',
         description='緯度(x座標)の平行移動値',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         default_value="0",
         sensitive=False,
         required=False
@@ -88,7 +89,7 @@ class ValidateConvertShapeFileToGeoDataFrame(DataProcessingBaseValidateProcessor
     Y_OFFSET = PropertyDescriptor(
         name='Longitude(Y) Offset',
         description='経度(y座標)の平行移動値',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         default_value="0",
         sensitive=False,
         required=False
@@ -121,17 +122,17 @@ class ValidateConvertShapeFileToGeoDataFrame(DataProcessingBaseValidateProcessor
 
             # shapefileのエンコーディング取得
             shape_file_encode = context.getProperty(
-                self.SHAPE_FILE_ENCODE).getValue()
+                self.SHAPE_FILE_ENCODE).evaluateAttributeExpressions(flowfile).getValue()
 
             # shapefileの座標参照系（CRS）取得
             shape_file_crs = context.getProperty(
-                self.SHAPE_FILE_CRS).getValue()
+                self.SHAPE_FILE_CRS).evaluateAttributeExpressions(flowfile).getValue()
 
             # x座標の平行移動値取得
-            x_offset = context.getProperty(self.X_OFFSET).getValue()
+            x_offset = context.getProperty(self.X_OFFSET).evaluateAttributeExpressions(flowfile).getValue()
 
             # y座標の平行移動値取得
-            y_offset = context.getProperty(self.Y_OFFSET).getValue()
+            y_offset = context.getProperty(self.Y_OFFSET).evaluateAttributeExpressions(flowfile).getValue()
 
             # --------------------------------------------------------------------------
             # input_crsが正しいepsgかどうかの検証

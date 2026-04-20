@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -785,8 +785,11 @@ class SplitGeoDataFrame(FlowFileTransform):
                         output_dwh_list.append(
                             f"{output_dwh_name}_{unit_code_list[target_unit_code_list_index]}")
 
+                        # 出力されるFieldSetFileのType列を取得
+                        output_type = WM.calc_func_time(self.logger)(NSP.get_field_set_file_geometry_type)(splitted_geodataframe)
+
                         # Type列用リストに種類を格納
-                        output_type_list.append("GeoDataFrame")
+                        output_type_list.append(output_type)
 
                     split_count = str(len(splitted_geodataframes_list))
 
@@ -1080,8 +1083,11 @@ class SplitGeoDataFrame(FlowFileTransform):
                             filtered_containing_polygons.keys())[0]
                         dwh_name = f"{output_dwh_name}_{zoom_level_name}"
 
+                    # 出力されるFieldSetFileのType列を取得
+                    output_type = WM.calc_func_time(self.logger)(NSP.get_field_set_file_geometry_type)(geodataframe)
+
                     output_dwh_list = [dwh_name]
-                    output_type_list = ["GeoDataFrame"]
+                    output_type_list = [output_type]
                     after_split_geodataframe_list = [geodataframe]
 
                 else:
@@ -1119,9 +1125,9 @@ class SplitGeoDataFrame(FlowFileTransform):
                 output_dwh_list = [f"{output_dwh_name}_{i}" for i in range(
                     len(after_split_geodataframe_list))]
 
-                # type_listを生成
-                output_type_list = ["GeoDataFrame"] * \
-                    len(after_split_geodataframe_list)
+                # # 出力されるFieldSetFileのType列を取得
+                for split_geodataframe in after_split_geodataframe_list:
+                    output_type_list.append(WM.calc_func_time(self.logger)(NSP.get_field_set_file_geometry_type)(split_geodataframe))
 
             # -----------------------------------------------------------------------------------------------------------
             # 出力データの成形
@@ -1138,7 +1144,10 @@ class SplitGeoDataFrame(FlowFileTransform):
                     output_type_list = []
                     for code in after_split_polygon_dict:
                         output_dwh_list.append(f"{output_dwh_name}_{code}")
-                        output_type_list.append("GeoDataFrame")
+                    
+                    # 出力されるFieldSetFileのType列を取得
+                    for split_geodataframe in after_split_geodataframe_list:
+                        output_type_list.append(WM.calc_func_time(self.logger)(NSP.get_field_set_file_geometry_type)(split_geodataframe))
 
             split_count = str(len(after_split_geodataframe_list))
 

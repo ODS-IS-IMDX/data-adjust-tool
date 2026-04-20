@@ -1,0 +1,14 @@
+scipy==1.13.0
+numpy==1.26.4
+numba==0.59.1
+pandas==2.2.1
+Fiona==1.9.6
+pyproj==3.6.1
+Rtree==1.2.0
+shapely==2.0.4
+geopandas==1.0.1
+pygltflib==1.16.2
+numba==0.59.1
+SciPy==1.13.0
+python/api/nifiapi/NifiLocalPackages/GDAL-3.10.1-cp311-cp311-win_amd64.whl
+tky2jgd==0.1.0

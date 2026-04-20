@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +66,7 @@ class ConvertCSVToDataFrame(FlowFileTransform):
         name='Input CSV Encoding Code',
         description='CSVのデコードに用いる文字コード',
         default_value='utf-8',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -90,7 +91,7 @@ class ConvertCSVToDataFrame(FlowFileTransform):
 
  ※Empty string setの場合は自動的に型を設定
                       """,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -100,7 +101,7 @@ class ConvertCSVToDataFrame(FlowFileTransform):
         name='Column Flag',
         description='入力データのCSVにカラムが書かれているかどうか',
         allowable_values=[TRUE_COLUMN_FLAG, FALSE_COLUMN_FLAG],
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -130,11 +131,11 @@ class ConvertCSVToDataFrame(FlowFileTransform):
             column_flag: 入荷CSVにカラムがあるのかのフラグ
         """
         input_csv_encoding_code = context.getProperty(
-            self.INPUT_CSV_ENCODING_CODE).getValue()
+            self.INPUT_CSV_ENCODING_CODE).evaluateAttributeExpressions(flowfile).getValue()
 
-        definition_csv = context.getProperty(self.DEFINITION_CSV).getValue()
+        definition_csv = context.getProperty(self.DEFINITION_CSV).evaluateAttributeExpressions(flowfile).getValue()
 
-        column_flag = context.getProperty(self.COLUMN_FLAG).getValue()
+        column_flag = context.getProperty(self.COLUMN_FLAG).evaluateAttributeExpressions(flowfile).getValue()
 
         return input_csv_encoding_code, definition_csv, column_flag
 

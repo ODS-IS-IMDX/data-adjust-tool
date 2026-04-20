@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +68,7 @@ class SetValueAdditionOrMultiplication(FlowFileTransform):
         allowable_values=[MULTIPLICATION, ADDITION],
         required=True,
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
     )
 
     # 計算する値
@@ -76,7 +77,7 @@ class SetValueAdditionOrMultiplication(FlowFileTransform):
         description="一律で演算に用いる既定値",
         required=True,
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
     )
 
     # 処理後のDWH名
@@ -114,10 +115,10 @@ class SetValueAdditionOrMultiplication(FlowFileTransform):
         """
 
         calculation_type \
-            = context.getProperty(self.CALCULATION_TYPE).getValue()
+            = context.getProperty(self.CALCULATION_TYPE).evaluateAttributeExpressions(flowfile).getValue()
 
         calculation_value \
-            = float(context.getProperty(self.CALCULATION_VALUE).getValue())
+            = float(context.getProperty(self.CALCULATION_VALUE).evaluateAttributeExpressions(flowfile).getValue())
 
         output_dwh_name \
             = context.getProperty(self.OUTPUT_DWH_NAME).evaluateAttributeExpressions(flowfile).getValue()

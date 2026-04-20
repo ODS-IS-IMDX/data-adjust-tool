@@ -1,0 +1,5 @@
+numpy==1.26.4
+pandas==2.2.1
+scipy==1.13.0
+pillow==10.4.0
+laspy==2.5.3

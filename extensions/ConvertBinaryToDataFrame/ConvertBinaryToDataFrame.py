@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +68,7 @@ class ConvertBinaryToDataFrame(FlowFileTransform):
         name='Binary Encoding Code',
         description='バイナリファイルのデコードに用いる文字コード',
         default_value='shift-jis',
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -93,7 +94,7 @@ class ConvertBinaryToDataFrame(FlowFileTransform):
 　　2…浮動小数点型
 　　3…文字列型
                       """,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -121,7 +122,7 @@ class ConvertBinaryToDataFrame(FlowFileTransform):
             partition_definition_csv:
         """
         binary_encoding_code = context.getProperty(
-            self.BINARY_ENCODING_CODE).getValue()
+            self.BINARY_ENCODING_CODE).evaluateAttributeExpressions(flowfile).getValue()
 
         partition_definition_csv = context.getProperty(
             self.PARTITION_DEFINITION_CSV).evaluateAttributeExpressions(flowfile).getValue()

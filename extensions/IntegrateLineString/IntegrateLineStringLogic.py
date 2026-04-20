@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025, 2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,58 +37,174 @@ dijkstra = getattr(import_module("scipy.sparse.csgraph"), "dijkstra")
 pd = import_module("pandas")
 linemerge = getattr(import_module("shapely.ops"), "linemerge")
 jit = getattr(import_module("numba"), "jit")
+types = import_module("numba.types")
+List = getattr(import_module("numba.typed"), "List")
 
 import cad.common.cad_utils as CU
 import nifiapi.NifiCustomPackage.NifiSimplePackage as NSP
 
 
-@jit(nopython=True, cache=True, nogil=True)
-def process_data(integrated_geo_ndarray, original_geo_ndarray, org_fids, int_fids):
+@jit(
+    "Tuple((f8[:], i8[:], f8[:]))(f8[:, :], f8[:, :], f8[:], f8[:])",
+    nopython=True,
+    cache=True,
+    nogil=True,
+)
+def process_data(integrated_geo_ndarray, original_geo_ndarray, org_fidx_array, int_fidx_array):
     """
-    FIDのペアリストを生成する
+    Findex紐づけのための「統合後Findex -> 統合前Findex群」を高速に構築する(Numba nopython)。
 
-    :param integrated_geo_ndarray: 座標のリスト。各要素はタプル形式で表された座標。
-    :type integrated_geo_ndarray: numpy.ndarray
-    :param int_fids: 統合後線分のFIDデータ。
-    :type int_fids: list[tuple[str, float]]
-    :param original_geo_ndarray: 統合前線分のジオメトリデータ。
-    :type original_geo_ndarray: list[shapely.geometry.base.BaseGeometry]
-    :param org_fids: 統合前線分のFIDデータ。
-    :type org_fids: list[tuple[str, float]]
+    重要:
+      - Numba(nopython)では「strを含むtuple」や「list[tuple[str, float]]」を扱えない。
+      - そのため org_fids / int_fids からは「Findex(float)だけ」をPython側で抽出し、
+        この関数には float64 の numpy 配列だけを渡す。
 
-    :return: FIDのペアリスト。
-    :rtype: list
+    :param integrated_geo_ndarray: 統合後GeoNdarray。形式は [geom_id, x, y, (z...)] の行配列を想定する。
+    :type integrated_geo_ndarray: numpy.ndarray(float64)
+    :param original_geo_ndarray: 統合前GeoNdarray。形式は [geom_id, x, y, (z...)] の行配列を想定する。
+    :type original_geo_ndarray: numpy.ndarray(float64)
+    :param org_fidx_array: 統合前のFindex配列。インデックス=geom_id(0相対) で引ける前提。
+    :type org_fidx_array: numpy.ndarray(float64)
+    :param int_fidx_array: 統合後のFindex配列。インデックス=geom_id(0相対) で引ける前提。
+    :type int_fidx_array: numpy.ndarray(float64)
 
-    :raises Exception:
-        座標の処理中にエラーが発生した場合に例外をスローする。
+    :return:
+      - int_keys:  各統合後セグメントに対応する「統合後Findex」配列
+      - offsets:   org_flat の区切り位置(CSR形式)。長さは len(int_keys) + 1
+      - org_flat:  各統合後Findexに紐づく「統合前Findex」群をフラット化した配列
+    :rtype: (numpy.ndarray(float64), numpy.ndarray(int64), numpy.ndarray(float64))
     """
 
-    pairs_list = []
-    org_segment = []
+    # ----------------------------
+    # 1) 統合前: セグメント開始行(starts)とgeom_id配列(ids)を作る
+    #    セグメントの定義は「隣接2行のgeom_idが同じなら、その2点は1セグメント」とする
+    # ----------------------------
+    n_org = original_geo_ndarray.shape[0]
+    org_seg_count = 0
 
-    for org_idx in range(len(original_geo_ndarray) - 1):
-        if original_geo_ndarray[org_idx, 0] != original_geo_ndarray[org_idx + 1, 0]:
-            continue
+    for i in range(n_org - 1):
+        if original_geo_ndarray[i, 0] == original_geo_ndarray[i + 1, 0]:
+            org_seg_count += 1
 
-        org_segment.append(original_geo_ndarray[org_idx:org_idx + 2, 1:])
+    org_starts = np.empty(org_seg_count, dtype=np.int64)
+    org_geom_ids = np.empty(org_seg_count, dtype=np.int64)
 
-    for int_idx in range(len(integrated_geo_ndarray) - 1):
-        if integrated_geo_ndarray[int_idx, 0] != integrated_geo_ndarray[int_idx + 1, 0]:
-            continue
+    p = 0
+    for i in range(n_org - 1):
+        if original_geo_ndarray[i, 0] == original_geo_ndarray[i + 1, 0]:
+            org_starts[p] = i
+            org_geom_ids[p] = int(original_geo_ndarray[i, 0])
+            p += 1
 
-        int_segment = integrated_geo_ndarray[int_idx:int_idx + 2, 1:]
+    # ----------------------------
+    # 2) 統合後: セグメント開始行とgeom_id配列を作る
+    # ----------------------------
+    n_int = integrated_geo_ndarray.shape[0]
+    int_seg_count = 0
 
-        match_fidx_list = []
+    for i in range(n_int - 1):
+        if integrated_geo_ndarray[i, 0] == integrated_geo_ndarray[i + 1, 0]:
+            int_seg_count += 1
 
-        for i, B in enumerate(org_segment):
-            if np.array_equal(int_segment, B) or np.array_equal(int_segment, B[::-1]):
-                match_fidx_list.append((org_fids[int(original_geo_ndarray[i, 0])][1]))
+    int_starts = np.empty(int_seg_count, dtype=np.int64)
+    int_geom_ids = np.empty(int_seg_count, dtype=np.int64)
 
-        target_int_fidx = int_fids[int(integrated_geo_ndarray[int_idx, 0])][1]
-        pairs_list.append((integrated_geo_ndarray[int_idx, 0], sorted(match_fidx_list)))
-        pairs_list.append((target_int_fidx, sorted(match_fidx_list)))
+    p = 0
+    for i in range(n_int - 1):
+        if integrated_geo_ndarray[i, 0] == integrated_geo_ndarray[i + 1, 0]:
+            int_starts[p] = i
+            int_geom_ids[p] = int(integrated_geo_ndarray[i, 0])
+            p += 1
 
-    return pairs_list
+    # ----------------------------
+    # 3) CSR形式で結果を構築
+    #    - keys:   統合後Findex
+    #    - flat:   紐づく統合前Findex群(フラット)
+    #    - offsets:flatの区切り
+    # ----------------------------
+    keys = List.empty_list(types.float64)
+    offsets = List.empty_list(types.int64)
+    flat = List.empty_list(types.float64)
+
+    # offsetsは「0始まり」で、最後に最終長を追加する(=CSRの作法)
+    offsets.append(0)
+
+    # 座標次元は列数-1(先頭列はgeom_id)
+    col_count = integrated_geo_ndarray.shape[1]
+
+    for k in range(int_seg_count):
+        int_row = int_starts[k]
+        int_gid = int_geom_ids[k]
+
+        # 統合後Findex(=キー)
+        int_key_fidx = int_fidx_array[int_gid]
+
+        # この統合後セグメントに一致した統合前Findexを一時的に貯める
+        match_list = List.empty_list(types.float64)
+
+        # 全統合前セグメントと突き合わせ
+        for j in range(org_seg_count):
+            org_row = org_starts[j]
+
+            # 前向き一致チェック
+            same_fwd = True
+            for c in range(1, col_count):
+                if integrated_geo_ndarray[int_row, c] != original_geo_ndarray[org_row, c]:
+                    same_fwd = False
+                    break
+                if integrated_geo_ndarray[int_row + 1, c] != original_geo_ndarray[org_row + 1, c]:
+                    same_fwd = False
+                    break
+
+            if same_fwd:
+                org_gid = org_geom_ids[j]
+                match_list.append(org_fidx_array[org_gid])
+                continue
+
+            # 逆向き一致チェック(始点終点が逆)
+            same_rev = True
+            for c in range(1, col_count):
+                if integrated_geo_ndarray[int_row, c] != original_geo_ndarray[org_row + 1, c]:
+                    same_rev = False
+                    break
+                if integrated_geo_ndarray[int_row + 1, c] != original_geo_ndarray[org_row, c]:
+                    same_rev = False
+                    break
+
+            if same_rev:
+                org_gid = org_geom_ids[j]
+                match_list.append(org_fidx_array[org_gid])
+
+        # Python側のグルーピングで順序がぶれないよう、ここでソートして確定させる
+        match_list.sort()
+
+        # keyを追加
+        keys.append(int_key_fidx)
+
+        # flatへ詰める
+        for t in range(len(match_list)):
+            flat.append(match_list[t])
+
+        # offsetsに「ここまでの長さ」を積む
+        offsets.append(len(flat))
+
+    # ----------------------------
+    # 4) typed.List -> numpy.ndarray へ変換して返す
+    #    (NiFi側で扱いやすく、かつ後段のPython処理も速い)
+    # ----------------------------
+    keys_arr = np.empty(len(keys), dtype=np.float64)
+    for i in range(len(keys)):
+        keys_arr[i] = keys[i]
+
+    offsets_arr = np.empty(len(offsets), dtype=np.int64)
+    for i in range(len(offsets)):
+        offsets_arr[i] = offsets[i]
+
+    flat_arr = np.empty(len(flat), dtype=np.float64)
+    for i in range(len(flat)):
+        flat_arr[i] = flat[i]
+
+    return keys_arr, offsets_arr, flat_arr
 
 
 def extract_cycles_and_cycle_nodes(polygon_coords, nodes_keys, nodes_values):
@@ -1162,82 +1278,126 @@ class IntegrateLineStringLogic:
             raise Exception(f"[delete_duplicate_edges_Exception]: {str(e)}")
 
     def create_findex_pairs(
-        self, int_geoms, int_fids, org_geoms, org_fids, dup_del_flg
-    ):
-        """
-        統合前と統合後の線分のFindex紐づけ処理を行う。
+            self, int_geoms, int_fids, org_geoms, org_fids, dup_del_flg
+        ):
+            """
+            統合前と統合後の線分のFindex紐づけ処理を行う。
 
-        :param int_geoms: 統合後線分のジオメトリデータ。
-        :type int_geoms: list[shapely.geometry.base.BaseGeometry]
-        :param int_fids: 統合後線分のFIDデータ。
-        :type int_fids: list[tuple[str, float]]
-        :param org_geoms: 統合前線分のジオメトリデータ。
-        :type org_geoms: list[shapely.geometry.base.BaseGeometry]
-        :param org_fids: 統合前線分のFIDデータ。
-        :type org_fids: list[tuple[str, float]]
-        :param dup_del_flg: 重複削除フラグ。
-        :type dup_del_flg: bool
+            重要:
+            - Numba(nopython)では list[tuple[str, float]] を扱えない。
+            - そのため、この関数内(Python側)で Findexだけを float64 配列に抜き出してから、
+                process_data(Numba)へ渡す。
 
-        :return: 統合前の線分のFindexと統合後の線分のFindexを紐づけた結果。
-        :rtype: list[tuple[float, float]]
+            :param int_geoms: 統合後線分のジオメトリデータ。
+            :type int_geoms: list[shapely.geometry.base.BaseGeometry]
+            :param int_fids: 統合後線分のFIDデータ。(例: [(fid_str, findex_float), ...])
+            :type int_fids: list[tuple[str, float]]
+            :param org_geoms: 統合前線分のジオメトリデータ。
+            :type org_geoms: list[shapely.geometry.base.BaseGeometry]
+            :param org_fids: 統合前線分のFIDデータ。(例: [(fid_str, findex_float), ...])
+            :type org_fids: list[tuple[str, float]]
+            :param dup_del_flg: 重複削除フラグ。
+            :type dup_del_flg: bool
 
-        :raises Exception:
-            処理中にエラーが発生した場合に例外をスローする。
-        """
-        try:
-            # ジオメトリリストをGeoNdarrayに変換
-            integrated_geo_ndarray = NSP.get_geometries_points_numpy(int_geoms)
+            :return: 統合前Findexと統合後Findexのペア。
+            :rtype: list[tuple[float, float]]
+            """
+            try:
+                # ----------------------------
+                # 1) ジオメトリリストをGeoNdarrayに変換
+                #    (Numbaのシグネチャを安定させるため、float64に寄せる)
+                # ----------------------------
+                integrated_geo_ndarray = NSP.get_geometries_points_numpy(int_geoms)
+                original_geo_ndarray = NSP.get_geometries_points_numpy(org_geoms)
 
-            # 統合前線分のジオメトリリストをGeoNdarrayに変換
-            original_geo_ndarray = NSP.get_geometries_points_numpy(org_geoms)
+                # dtypeをfloat64へ(コピーを極力避ける)
+                integrated_geo_ndarray = integrated_geo_ndarray.astype(np.float64, copy=False)
+                original_geo_ndarray = original_geo_ndarray.astype(np.float64, copy=False)
 
-            # FIDのペアリストを生成する
-            pairs_list = process_data(integrated_geo_ndarray, original_geo_ndarray, org_fids, int_fids)
+                # ----------------------------
+                # 2) FIDタプル(list[tuple[str, float]])からFindexだけを抜き出して配列化
+                #    ここはNumbaの外なので、Pythonで普通にやってOK
+                # ----------------------------
+                org_fidx_array = np.empty(len(org_fids), dtype=np.float64)
+                for i in range(len(org_fids)):
+                    # org_fids[i] は (fid_str, findex_float) を想定
+                    org_fidx_array[i] = float(org_fids[i][1])
 
-            # 重複削除フラグがFalseの場合
-            if dup_del_flg:
-                # ペアリストからペアデータを生成する
-                pairs_results = set(
-                    [
-                        (float(int_fidx), float(org_fidx))
-                        for int_fidx, org_fidx_list in pairs_list
-                        for org_fidx in org_fidx_list
-                    ]
+                int_fidx_array = np.empty(len(int_fids), dtype=np.float64)
+                for i in range(len(int_fids)):
+                    # int_fids[i] は (fid_str, findex_float) を想定
+                    int_fidx_array[i] = float(int_fids[i][1])
+
+                # ----------------------------
+                # 3) Numbaで「統合後Findex -> 統合前Findex群(CSR形式)」を構築
+                # ----------------------------
+                int_keys, offsets, org_flat = process_data(
+                    integrated_geo_ndarray,
+                    original_geo_ndarray,
+                    org_fidx_array,
+                    int_fidx_array,
                 )
-            else:
-                # １つの統合後線分に対し紐づけられた統合元線分のFindexが複数かつ、組合わせも同じ場合、１対１のペアにする
-                pairs_groups = defaultdict(list)
-                # 右辺のリストをキーにしてグループ化
-                for key, value in pairs_list:
-                    pairs_groups[tuple(value)].append(float(key))
-                # 紐づけられた統合前線分のFindexの組合せごとに、統合後線分のFindexをグルーピングする
-                duplicates_pairs = [
-                    (list(keys), list(values)) for values, keys in pairs_groups.items()
-                ]
-                # グルーピング結果に基づいてペアデータを生成
-                pairs_data = []
-                for pairs in duplicates_pairs:
-                    if len(pairs[0]) == len(pairs[1]):
-                        # 左右の個数が同じ場合
-                        pair = zip(pairs[0], pairs[1])
-                    elif len(pairs[0]) > len(pairs[1]):
-                        # 統合後Findexの方が個数が多い場合（１つの線分が１つに分割されたときなど）
-                        pair = [(int_fidx, pairs[1][0]) for int_fidx in pairs[0]]
-                    elif len(pairs[1]) > len(pairs[0]):
-                        # 統合前Findexの方が個数が多い場合（１つの線分が１つに統合されたときなど）
-                        pair = [(pairs[0][0], org_fidx) for org_fidx in pairs[1]]
-                    else:
-                        continue
-                    # ペアデータをリストに追加
-                    pairs_data.append(pair)
 
-                # ペアデータからペアリストを作成
-                pairs_results = set([pair for pairs in pairs_data for pair in pairs])
+                # ----------------------------
+                # 4) 以降は既存ロジック(dup_del_flgの扱い)を維持
+                #    - dup_del_flg=True:  そのまま全組み合わせをペア化
+                #    - dup_del_flg=False: 右辺(統合前Findex群)が同じものをまとめて1対1へ寄せる
+                # ----------------------------
+                if dup_del_flg:
+                    # Numba結果(CSR)から直接ペア集合を作る(余計な中間リストを作らない)
+                    pairs_results = set()
+                    for i in range(len(int_keys)):
+                        start = int(offsets[i])
+                        end = int(offsets[i + 1])
+                        for j in range(start, end):
+                            pairs_results.add((float(int_keys[i]), float(org_flat[j])))
 
-            return sorted(pairs_results)
+                else:
+                    # １つの統合後線分に対し紐づけられた統合元線分のFindexが複数かつ、
+                    # 組合わせも同じ場合、１対１のペアにする(既存仕様)
+                    pairs_groups = defaultdict(list)
 
-        except Exception as e:
-            raise Exception(f"[create_findex_pairs_Exception]: {str(e)}")
+                    # 右辺のリスト(=統合前Findex群)をキーにしてグループ化
+                    for i in range(len(int_keys)):
+                        start = int(offsets[i])
+                        end = int(offsets[i + 1])
+
+                        # CSRのスライス区間をtuple化してキーにする
+                        # process_data側でsort済みなので順序は安定している
+                        value_key = tuple(float(org_flat[j]) for j in range(start, end))
+                        pairs_groups[value_key].append(float(int_keys[i]))
+
+                    # 紐づけられた統合前線分のFindexの組合せごとに、統合後線分のFindexをグルーピングする
+                    duplicates_pairs = [
+                        (list(keys), list(values)) for values, keys in pairs_groups.items()
+                    ]
+
+                    # グルーピング結果に基づいてペアデータを生成
+                    pairs_data = []
+                    for pairs in duplicates_pairs:
+                        if len(pairs[0]) == len(pairs[1]):
+                            # 左右の個数が同じ場合
+                            pair = zip(pairs[0], pairs[1])
+                        elif len(pairs[0]) > len(pairs[1]):
+                            # 統合後Findexの方が個数が多い場合（１つの線分が１つに分割されたときなど）
+                            pair = [(int_fidx, pairs[1][0]) for int_fidx in pairs[0]]
+                        elif len(pairs[1]) > len(pairs[0]):
+                            # 統合前Findexの方が個数が多い場合（１つの線分が１つに統合されたときなど）
+                            pair = [(pairs[0][0], org_fidx) for org_fidx in pairs[1]]
+                        else:
+                            continue
+
+                        # ペアデータをリストに追加
+                        pairs_data.append(pair)
+
+                    # ペアデータからペアリストを作成
+                    pairs_results = set([pair for pairs in pairs_data for pair in pairs])
+
+                return sorted(pairs_results)
+
+            except Exception as e:
+                raise Exception(f"[create_findex_pairs_Exception]: {str(e)}")
+
 
     def create_fsf_values(self, fsf_df, props):
         """

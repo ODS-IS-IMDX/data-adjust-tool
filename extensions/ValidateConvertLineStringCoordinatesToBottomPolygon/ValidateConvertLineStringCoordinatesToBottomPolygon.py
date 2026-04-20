@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,13 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Python標準ライブラリ
-from importlib import import_module
-
-# 外部ライブラリの動的インポート
-np = import_module("numpy")
-LineString = getattr(import_module("shapely.geometry"), "LineString")
-
+import numpy as np
+from shapely.geometry import LineString
 from cad.common.cad_base_validate_processor import CadBaseValidateProcessor
 from common.error_code_list import ErrorCodeList
 from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope, StandardValidators
@@ -37,7 +32,7 @@ class ValidateConvertLineStringCoordinatesToBottomPolygon(CadBaseValidateProcess
         implements = ['org.apache.nifi.python.processor.FlowFileTransform']
 
     class ProcessorDetails:
-        version = '1.0.0'
+        version = "1.0.0"
         description = '''プロセッサー「ConvertLineStringCoordinatesToBottomPolygon」の入力データのチェックを行う'''
         tags = ['FieldSetFile', 'python', 'validate']
 

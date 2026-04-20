@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,7 @@ from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope
 # 外部ライブラリの動的インポート
 pd = import_module("pandas")
 np = import_module("numpy")
-
+gpd = import_module("geopandas")
 
 class UpdateCoordinatesInDataFrame(FlowFileTransform):
 
@@ -129,29 +129,34 @@ class UpdateCoordinatesInDataFrame(FlowFileTransform):
             # --------------------------------------------------------------------------
             # クラスを比較してGeoDataFrameと座標配列に分ける
             # --------------------------------------------------------------------------
-            if isinstance(line1_object, np.ndarray):
+            if isinstance(line1_object, gpd.GeoDataFrame):
 
-                coordinates_array = line1_object.copy()
-                geodataframe = line2_object.copy()
+                geodataframe = line1_object.copy()
+                coordinates_array_or_geometry_list = line2_object.copy()
 
             else:
-                coordinates_array = line2_object.copy()
-                geodataframe = line1_object.copy()
+                geodataframe = line2_object.copy()
+                coordinates_array_or_geometry_list = line1_object.copy()
 
             # --------------------------------------------------------------------------
+            # 座標配列の場合は、座標配列をShapelyに変換し、geometry列を更新
+            if isinstance(coordinates_array_or_geometry_list, np.ndarray):
+                # DataFrameからジオメトリタイプ取得
+                result_array, \
+                    geometry_type_list, \
+                    index_array\
+                    = WM.calc_func_time(self.logger)(NSP.get_coordinates_array_from_geodataframe)(geodataframe)
 
-            # DataFrameからジオメトリタイプ取得
-            result_array, \
-                geometry_type_list, \
-                index_array\
-                = WM.calc_func_time(self.logger)(NSP.get_coordinates_array_from_geodataframe)(geodataframe)
+                coordinates_dict\
+                    = WM.calc_func_time(self.logger)(NSP.get_shapely_dict_from_coordinates_array)(coordinates_array_or_geometry_list,
+                                                                                                geometry_type_list)
 
-            coordinates_dict\
-                = WM.calc_func_time(self.logger)(NSP.get_shapely_dict_from_coordinates_array)(coordinates_array,
-                                                                                              geometry_type_list)
+                # geometry列更新
+                geodataframe[geodataframe.geometry.name] = coordinates_dict.values()
 
-            # geometry列更新
-            geodataframe[geodataframe.geometry.name] = coordinates_dict.values()
+            # shapelyの場合は、そのままgeometry列を更新
+            else:
+                geodataframe[geodataframe.geometry.name] = coordinates_array_or_geometry_list
 
             # --------------------------------------------------------------------------
             # 座標配列とGeoDataFrameでcrsが異なる場合はcrsを変換

@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,8 @@ from nifiapi.properties import PropertyDescriptor, ExpressionLanguageScope
 # 外部ライブラリの動的インポート
 np = import_module("numpy")
 pd = import_module("pandas")
+trimesh = import_module("trimesh")
+Polygon = import_module("shapely").geometry.Polygon
 
 CREATE = "作成する"
 NOT_CREATE = "作成しない"
@@ -347,6 +349,38 @@ class ConvertCoordinatesToMultipatch(FlowFileTransform):
 
         return id_coordinate_dict
 
+    def is_z_only_variation(self, coords_array, tol):
+        """
+        XY座標がほぼ変化せず、Z座標だけが変化している場合に True を返す。
+
+        :param coords_array: 中心線を構成する3D座標の配列 (N, 3)
+        :param tol: float, XY座標の変化を許容する誤差の範囲
+        :return: bool, Zのみ変化していれば True
+        """
+        n_points = coords_array.shape[0]
+        xy_first_x, xy_first_y = coords_array[0, 0], coords_array[0, 1]
+        z_first = coords_array[0, 2]
+
+        xy_consistent = True  # XYが一定かどうか
+        z_different = False   # Zが変化しているかどうか
+
+        for i in range(1, n_points):
+            xy_current_x, xy_current_y = coords_array[i, 0], coords_array[i, 1]
+            z_current = coords_array[i, 2]
+
+            # XY座標の誤差範囲内の変化を許容
+            if abs(xy_current_x - xy_first_x) > tol or abs(xy_current_y - xy_first_y) > tol:
+                xy_consistent = False
+                break  # XYが変化した時点で終了
+
+            # Z座標が異なる場合を検出
+            if abs(z_current - z_first) > tol:
+                z_different = True
+        # print(xy_consistent)
+        # print(z_different)
+        # print(xy_consistent and z_different)
+        return xy_consistent and z_different
+
     def generate_multi_patch(self, id_unique_array, id_coordinate_dict, width_array, depth_array, start_multipatch_flag, end_multipatch_flag):
         """
         概要:
@@ -396,6 +430,79 @@ class ConvertCoordinatesToMultipatch(FlowFileTransform):
                 [feature_id_array, multipatch_array, multipatch_geometry_id_array], axis=1)
 
             multi_patch_list.append(multipatch_array)
+
+        ids_to_remake = []
+
+        for id_val in id_unique_array:
+            coords = id_coordinate_dict[id_val]
+
+            if len(coords) < 2:
+                continue  # 点が1つしかない場合はスキップ
+
+            # Zのみ変化かどうか
+            if not self.is_z_only_variation(coords, 1e-8):
+                xy = coords[:, :2]
+                n_unique_xy = np.unique(xy, axis=0).shape[0]
+                n_points = coords.shape[0]
+
+                if n_unique_xy < n_points:
+                    # 縦線＋横線のような構成
+                    ids_to_remake.append(id_val)
+                else:
+                    # 横線 or 斜め線のみ → 生成済みのままでOK
+                    pass
+            else:
+                # Zのみ変化の場合はスキップ（縦線のみ）
+                pass
+
+        for id_val in ids_to_remake:
+            path_points = id_coordinate_dict[id_val]
+
+            idx = np.where(id_unique_array == id_val)[0][0]
+
+            width = width_array[idx, 1] * 2.0
+            height = depth_array[idx, 1] * 2.0
+            self.logger.warn(str(id_val))
+            self.logger.warn(str(width))
+
+            # 四角形断面
+            section = Polygon([
+                        (-width/2, -height/2),
+                        ( width/2, -height/2),
+                        ( width/2,  height/2),
+                        (-width/2,  height/2),
+                    ])
+
+            # スイープ
+            mesh = trimesh.creation.sweep_polygon(
+                polygon=section,
+                path=path_points,
+                make_path_smooth=True
+            )
+            # face_vertices を作成 (N_faces, 3, 3)
+            face_vertices = mesh.vertices[mesh.faces]
+
+            # add_vertex_normal に渡して法線計算 (xyz + nx ny nz)
+            vertices_with_normals = NCP.add_vertex_normal(face_vertices)  # shape: (N_faces, 3, 6)
+
+            # ポリゴンを閉じるために先頭の点を4点目に設定
+            multipatch_array = np.concatenate([vertices_with_normals, vertices_with_normals[:, 0:1, :]], axis=1).reshape(
+                (len(vertices_with_normals)*4, 6))
+
+            # マルチパッチジオメトリID生成
+            multipatch_geometry_id_array = np.repeat(np.arange(
+                0, len(vertices_with_normals)), 4).reshape(len(multipatch_array), 1)
+
+            # 地物ID生成
+            feature_id_array = np.array(
+                len(multipatch_array) * [id_val]).reshape(len(multipatch_array), 1)
+
+            # ID+xyz+multi_IDの形に結合
+            multipatch_array = np.concatenate(
+                [feature_id_array, multipatch_array, multipatch_geometry_id_array], axis=1)
+
+            # multi_patch_list を置き換え
+            multi_patch_list[idx] = multipatch_array
 
         return multi_patch_list
 

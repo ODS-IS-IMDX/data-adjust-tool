@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -279,7 +279,9 @@ class ConvertCoordinatesVectorAffineNoDefinition(FlowFileTransform):
             # arrayをfieldsetfileにし、出力
             # -------------------------------------------------------------------------------------------------------------------------------------------------
             correction_target_feature_array[:, :4] = affine_target_array
-            geometry_type = "geometry"
+
+            # 出力されるFieldSetFileのType列を取得
+            geometry_type = WM.calc_func_time(self.logger)(NSP.get_field_set_file_geometry_type)(correction_target_feature_array)
 
             # 出力FieldSetFile仕様にリスト化
             output_dwh_name_list = [output_dwh_name]

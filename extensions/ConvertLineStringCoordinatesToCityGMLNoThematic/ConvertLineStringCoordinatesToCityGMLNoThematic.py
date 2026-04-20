@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 
 # Python標準ライブラリ
 import io
+import zipfile
 import traceback
 import pickle
 import base64
@@ -51,6 +52,11 @@ from nifiapi.flowfiletransform import FlowFileTransform, FlowFileTransformResult
 
 pd = import_module("pandas")
 np = import_module("numpy")
+unary_union = import_module("shapely.ops").unary_union
+Polygon = import_module("shapely.geometry").Polygon
+
+ZIP_COMPRESSION_ENABLED = "圧縮する"
+ZIP_COMPRESSION_DISABLED = "圧縮しない"
 
 
 class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
@@ -81,7 +87,7 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
     CENTER_DWH_NAME = PropertyDescriptor(
         name="Center DWH Name",
         description="入力データの座標配列のDWH名",
-        required=True,
+        required=False,
         sensitive=False,
         expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES
     )
@@ -125,12 +131,24 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
         default_value="${crs}",
     )
 
+    # ZIP圧縮するかどうかのフラグ（圧縮するまたは圧縮しない）デフォルトは"圧縮しない"
+    OUTPUT_ZIP_FLAG = PropertyDescriptor(
+        name="Output ZIP Flag",
+        description="出力結果をZIP圧縮するかどうかのフラグ",
+        default_value=ZIP_COMPRESSION_DISABLED,
+        allowable_values=[ZIP_COMPRESSION_ENABLED, ZIP_COMPRESSION_DISABLED],
+        required=True,
+        sensitive=False,
+        expression_language_scope=ExpressionLanguageScope.NONE
+    )
+
     property_descriptors = [DATA_DEFINITION_DELIMITER,
                             CENTER_DWH_NAME,
                             GML_ID_DWH_NAME,
                             FEATURE_TAG_STRING,
                             LEVEL2500_UNIT_CODE_STRING,
-                            OUTPUT_TARGET_CRS_STRING]
+                            OUTPUT_TARGET_CRS_STRING,
+                            OUTPUT_ZIP_FLAG]
 
     def __init__(self, **kwargs):
         pass
@@ -153,6 +171,7 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
             feature_tag_string: ジオメトリループ用tag
             level2500_unit_code_string: 出力対象レベル2500国土基本図図郭コード文字列郡
             output_target_crs_string: 出力対象CRS
+            output_zip_flag: ZIP圧縮するかどうかのフラグ
         """
 
         # データ定義ファイルの区切り文字
@@ -179,7 +198,12 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
         output_target_crs_string = context.getProperty(
             self.OUTPUT_TARGET_CRS_STRING).evaluateAttributeExpressions(flowfile).getValue()
 
-        return data_definition_delimiter, center_dwh_name, gml_id_dwh_name, feature_tag_string, level2500_unit_code_string, output_target_crs_string
+        # ZIP圧縮するかどうかのフラグ
+        output_zip_flag\
+            = context.getProperty(self.OUTPUT_ZIP_FLAG).evaluateAttributeExpressions(flowfile).getValue()
+
+
+        return data_definition_delimiter, center_dwh_name, gml_id_dwh_name, feature_tag_string, level2500_unit_code_string, output_target_crs_string, output_zip_flag
 
     def get_flowfile(self, flowfile):
         """
@@ -516,6 +540,50 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
 
         return element_dict, output_element_tree
 
+    def add_attribute_to_element(self, element_list, element_object):
+        
+        if len(element_list)>1:
+
+            for element in element_list[1:]:
+                # 1つ目以降の要素
+                # '='でsplitして属性名と属性値に分ける
+                value_split_list = element.split(DDC.XML_ATTRIBUTE_VALUE_DELIMITER)
+                
+                # 追加
+                element_object.set(value_split_list[0],
+                                value_split_list[1])
+        else:
+            pass
+        
+        return element_object
+
+    def create_element_attribute(self, element_list, element_dict):
+        # ---------------------------------------------------------------
+        # ネストされた要素を作成 最後の要素を返す←値を追加する用
+        # 引数1：要素名List 要素はstr
+        # ---------------------------------------------------------------
+        root = ET.Element(element_list[0][0])
+        root=self.add_attribute_to_element(element_list[0], root)
+        element_dict["-".join(element_list[0])] = root
+        
+        if len(element_list)==1:
+            return root, root, element_dict
+        else:
+            pass
+
+        sub_element = ET.SubElement(root, element_list[1][0])
+        sub_element=self.add_attribute_to_element(element_list[1],sub_element)
+        element_dict["-".join(element_list[1])] = sub_element
+
+        for fi in range(len(element_list)-2):
+            sub_element = ET.SubElement(sub_element, element_list[fi + 2][0])
+            sub_element=self.add_attribute_to_element(element_list[fi+2],sub_element)
+
+            element_dict["-".join(element_list[fi+2])] = sub_element
+
+        return root, sub_element, element_dict
+
+
     def decide_to_add_attribute_to_tag(self, attribute_split_list, output_element_tree, attribute_array_list, all_attribute_name_list_index, index):
         """
         概要:
@@ -532,14 +600,32 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
             attribute_element: 新しく作成されたXML要素。
         """
 
+        # attribute_element = ET.Element(attribute_split_list[0][0])
+        # output_element_tree.append(attribute_element)
+        # attribute_element.text = str(
+        #     attribute_array_list[all_attribute_name_list_index][index])
+
+
         attribute_element = ET.Element(attribute_split_list[0][0])
-        output_element_tree.append(attribute_element)
+
+        attribute_element\
+            =self.add_attribute_to_element(attribute_split_list[0],
+                                           attribute_element) 
+
         attribute_element.text = str(
             attribute_array_list[all_attribute_name_list_index][index])
 
+        output_element_tree.append(attribute_element)
+
         return attribute_element
 
-    def append_attribute_to_tag(self, element_dict, attribute_split_list, attribute_array_list, all_attribute_name_list_index, index):
+    def append_attribute_to_tag(self,
+                                element_dict,
+                                attribute_split_list,
+                                attribute_array_list,
+                                all_attribute_name_list_index,
+                                index,
+                                key_bool):
         """
         概要:
             要素の辞書に対して、指定されたタグに属性を追加する関数
@@ -555,14 +641,36 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
             already_element_tree: 指定されたタグとテキストを持つ新しいXML要素
         """
 
-        already_element_tree = ET.SubElement(
-            element_dict[attribute_split_list[-2][0]], attribute_split_list[-1][0])
-        already_element_tree.text = str(
+        # 取り出すタグのインデックス特定
+        # 初めてFalseがでるひとつ前のインデックス
+        if np.all(key_bool):
+            target_index=0
+        else:
+            target_index=np.min(np.where(np.logical_not(key_bool)))-1
+            
+        # 設定するタグの作成
+        element_list=attribute_split_list[target_index+1:]
+        sub_element=element_dict["-".join(attribute_split_list[target_index])]
+        
+        for fi in range(len(element_list)):
+            sub_element = ET.SubElement(sub_element, element_list[fi][0])
+            sub_element=self.add_attribute_to_element(element_list[fi],sub_element)
+
+            element_dict["-".join(element_list[fi])] = sub_element
+        
+        # 地物の属性値を設定
+        sub_element.text = str(
             attribute_array_list[all_attribute_name_list_index][index])
+        
+        return sub_element
 
-        return already_element_tree
-
-    def add_attribute_to_tag_in_element_dict(self, attribute_split_list, attribute_array_list, all_attribute_name_list_index, index, element_dict, output_element_tree):
+    def add_attribute_to_tag_in_element_dict(self,
+                                             attribute_split_list,
+                                             attribute_array_list,
+                                             all_attribute_name_list_index,
+                                             index,
+                                             element_dict,
+                                             output_element_tree):
         """
         概要:
             要素の辞書に特定のタグに属性を追加する関数。
@@ -579,8 +687,10 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
             attribute_subelement: 属性の副要素
         """
 
-        attribute_element, attribute_subelement, element_dict = WM.calc_func_time(
-            self.logger, False)(NSP.create_element2)(attribute_split_list, element_dict)
+        attribute_element,\
+        attribute_subelement,\
+        element_dict\
+            = self.create_element_attribute(attribute_split_list, element_dict)
         output_element_tree.append(attribute_element)
         attribute_subelement.text = str(
             attribute_array_list[all_attribute_name_list_index][index])
@@ -680,10 +790,343 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
 
         return dwh_list, type_list, xml_value_list
 
+
+    def multipatch_to_exterior_polygon(self, triangles):
+        """
+        マルチパッチ（三角面群）を2Dポリゴンの外周形状に変換する
+        - 3D座標の z 値を無視し、XY 平面に射影して処理。
+        - 各三角形を 2D Polygon に変換し、unary_union で結合することで
+            重なりや隙間を吸収し、外形（輪郭）ポリゴンを抽出。
+        - 結果が MultiPolygon の場合は、最も面積の大きいポリゴンを採用。
+
+        引数:
+            triangles(numpy.ndarray) : - 形状: (n_triangles, 3, 3)
+                                        - 各三角形は3つの頂点 (x, y, z) を持つ。
+
+        戻り値:
+        shapely.geometry.Polygon or None
+            - 三角面群の統合結果から得られる2Dポリゴンの外周境界（exterior）。
+            - 入力データが不正または面として統合できない場合は None を返す。
+        """
+
+        triangles_2d = triangles[:, :, :2]
+
+        # 三角形ごとにPolygon化
+        polys = [Polygon(tri) for tri in triangles_2d]
+
+        # 全ての三角形を union して外周だけを抽出
+        merged = unary_union(polys)
+
+        if merged.geom_type == 'Polygon':
+            return Polygon(merged.exterior)
+
+        elif merged.geom_type == 'MultiPolygon':
+            largest = max(merged.geoms, key=lambda p: p.area)
+            return Polygon(largest.exterior)
+
+        else:
+            return None
+
+
+    def create_feature_rectangle_polygons(self, feature_array, level_mesh_array):
+        """
+        与えられた地物ポリゴンの外接矩形を基準に、交差するメッシュ矩形群を生成
+            - 地物ポリゴンの bounding box を求める
+            - 原点座標系に基づき、メッシュ単位で矩形を生成
+            - 各矩形は左上 → 右上 → 右下 → 左下の順で座標を保持
+
+        Parameters:
+            feature_array (np.ndarray): 地物座標 (N, 2)
+            level_mesh_array (np.ndarray): メッシュ単位配列 (M, 2) 単位: m
+
+        Returns:
+            np.ndarray: shape=(矩形数, 4, 2) 各矩形の 2D 座標
+        """
+
+        min_x = np.min(feature_array[:, 0])
+        min_y = np.min(feature_array[:, 1])
+        max_x = np.max(feature_array[:, 0])
+        max_y = np.max(feature_array[:, 1])
+
+        # 原点座標取得（NSP.get_origin_point_from_coordinates_array 依存）
+        area_array = NSP.get_origin_point_from_coordinates_array(
+            np.array([[min_x, max_y], [max_x, min_y]]), level_mesh_array)
+
+        temp_origin_array = area_array[0].copy()
+
+        x_number = int(((area_array[1, 0] - area_array[0, 0]) / level_mesh_array[-1, 0])) + 1
+        y_number = int(((area_array[0, 1] - area_array[1, 1]) / level_mesh_array[-1, 1])) + 1
+
+        # メッシュ方向ベクトル
+        x_mesh_array = np.array([level_mesh_array[-1, 0], 0])
+        y_mesh_array = np.array([0, -level_mesh_array[-1, 1]])
+
+        rectangles = []
+
+        for xi in range(x_number):
+            for yi in range(y_number):
+
+                # 左上の点
+                p1 = temp_origin_array + x_mesh_array * xi + y_mesh_array * yi
+                # 右上
+                p2 = p1 + x_mesh_array
+                # 右下
+                p3 = p2 + y_mesh_array
+                # 左下
+                p4 = p1 + y_mesh_array
+
+                rectangles.append(np.array([p1, p2, p3, p4]))
+ 
+        return np.array(rectangles)
+
+
+    def is_inside(self, p, edge_start, edge_end, ccw=True):
+        """
+        点 p が指定した辺の内側にあるか判定（Sutherland–Hodgman 用）
+
+        Parameters:
+            p (np.ndarray): 判定対象点 (x, y)
+            edge_start (np.ndarray): 辺の始点 (x, y)
+            edge_end (np.ndarray): 辺の終点 (x, y)
+            ccw (bool): True = 反時計回り（左が内側）、False = 時計回り
+
+        Returns:
+            bool: 内側なら True
+        """
+
+        # 外積計算で点の相対位置を判定
+        cross = (edge_end[0] - edge_start[0]) * (p[1] - edge_start[1]) - \
+                (edge_end[1] - edge_start[1]) * (p[0] - edge_start[0])
+
+        return cross >= 0 if ccw else cross <= 0
+
+
+    def clip_polygon(self, subject_polygon, clip_polygon, clip_ccw=1):
+        """
+        多角形 subject_polygon を clip_polygon 内部に切り取る（Sutherland–Hodgmanアルゴリズム）
+
+        Parameters:
+            subject_polygon (np.ndarray): 切り取られるポリゴン (N, 2)
+            clip_polygon (np.ndarray): クリップポリゴン (M, 2)
+            clip_ccw (int): 1=反時計回り, 0=時計回り
+
+        Returns:
+            np.ndarray: 切り取られたポリゴン頂点 (K, 2)
+        """
+
+        ccw = bool(clip_ccw)  # 1 → True（左側が内側）, 0 → False（右側が内側）
+        output_list = subject_polygon  # 最初は全体が残っている
+
+        # クリップポリゴンの各辺（順にループ）
+        for i in range(len(clip_polygon)):
+            input_list = output_list  # 前のループの出力を入力として使用
+            output_list = []  # 今回のループの出力初期化
+
+            cp1 = clip_polygon[i]                            # この辺の始点
+            cp2 = clip_polygon[(i + 1) % len(clip_polygon)]  # この辺の終点（循環）
+
+            if len(input_list) == 0:
+                break  # 切り取り後に点がないなら中断
+
+            s = input_list[-1]  # 始点（初回は最後の点）
+
+            for e in input_list:  # 各辺 s → e を調べる
+
+                line_array=np.array([cp1, cp2])
+
+                unit_array=np.array([[s, e]])
+
+                if self.is_inside(e, cp1, cp2, ccw):  # 終点が内側なら
+
+                    if not self.is_inside(s, cp1, cp2, ccw):
+                        # 始点が外で終点が内 → 交点追加
+                        output_list.append(NSP.get_intersect_point_array(line_array, unit_array)[0])
+
+                    # 終点（内側）を追加
+                    output_list.append(e)
+
+                elif self.is_inside(s, cp1, cp2, ccw):
+                    # 始点が内で終点が外 → 交点だけ追加（終点は外なので追加しない）
+                    output_list.append(NSP.get_intersect_point_array(line_array, unit_array)[0])
+
+                # 次の辺へ（今の終点が次の始点になる）
+                s = e
+
+        return np.array(output_list)
+
+
+    def calculate_polygon_area(self, coords):
+        """
+        与えられた多角形の面積を靴紐公式（Shoelace formula）で計算
+
+        Parameters:
+            coords(np.ndarray): (N, 2)配列の多角形頂点（閉じている必要はない）
+
+        Returns:
+            area(floatI): 計算された面積（正の値）
+        """
+
+        x = coords[:, 0]
+        y = coords[:, 1]
+
+        # 座標を1つずらして結合することで「隣接する点同士の積」を作る
+        x_next = np.roll(x, -1)
+        y_next = np.roll(y, -1)
+
+        area = 0.5 * np.abs(np.dot(x, y_next) - np.dot(x_next, y))
+
+        return area
+
+
+    def transform_polygon_orientation(self, coordinates_array, direction=1):
+        """
+        多角形の頂点座標を指定された向きに並べ替え、始点と終点を閉じた状態に
+
+        coordinates_array (np.ndarray): (N, 2) の配列
+        direction (int): 0=時計回り, 1=反時計回り
+
+        Returns
+        coords (np.ndarray): 指定方向に揃えられた多角形座標配列
+        """
+
+        # 配列をコピーして編集用にする
+        coords = coordinates_array.copy()
+
+        # 元の始点を保持
+        start_point = coords[0].copy()
+
+        # 閉じている場合は削除
+        closed = np.array_equal(coords[0], coords[-1])
+        if closed:
+            coords = coords[:-1]
+
+        # 面積計算
+        x, y = coords[:, 0], coords[:, 1]
+        x_next, y_next = np.roll(x, -1), np.roll(y, -1)
+        signed_area = 0.5 * np.sum(x * y_next - x_next * y)
+
+        current_ccw = 1 if signed_area > 0 else 0
+
+        # 方向修正
+        if current_ccw != direction:
+            coords = coords[::-1]
+            # 元の始点を最後に追加して閉じる
+            coords = np.vstack([start_point[np.newaxis, :], coords])
+
+        else:
+            # 元の始点を最後に追加して閉じる
+            coords = np.vstack([coords, start_point[np.newaxis, :]])
+
+        return coords
+
+
+    def judge_citygml_multipatch(self, feature_array, unit_origin_array, level_mesh_array):
+        """
+        CityGML形式のMultiPatch地物が、与えられたメッシュ単位内に含まれるか判定
+            1. 図郭の境界を取得
+            2. MultiPatchの外周を計算
+            3. 地物の座標が図郭内に完全に含まれるかを判定
+            4. 矩形を作成し、各矩形と地物外周との交差面積を計算
+            5. 図郭内の地物面積が最大かどうかで最終判定
+
+        Parameters:
+            feature_array (np.ndarray): MultiPatch地物の座標配列 shape=(N, 2)
+                                        Nは全頂点数（通常4頂点×三角形数など）
+            unit_origin_array (np.ndarray): 図郭の原点座標配列
+            level_mesh_array (np.ndarray): メッシュ単位のサイズ配列 shape=(N, 2) 単位:m
+
+        Returns:
+            bool: 地物が指定図郭内に含まれる場合 True, そうでなければ False
+        """
+
+        # 図郭の最小・最大座標取得（左上・右下）
+        unit_min_x, unit_max_x, unit_min_y, unit_max_y = NSP.get_unit_min_max(
+            unit_origin_array, level_mesh_array)
+
+        # 図郭原点座標（左上を基準に整数化）
+        origin_point = (int(unit_min_x), int(unit_max_y))
+
+        # MultiPatch地物を4頂点×三角形に整形し、外周を取得
+        exterior_polygon = self.multipatch_to_exterior_polygon(feature_array.reshape(int(len(feature_array)/4), 4, 2))
+
+        # 外周が存在すれば座標配列に変換、存在しなければ空配列
+        if exterior_polygon is not None and not exterior_polygon.is_empty:
+            exterior_array = np.array(exterior_polygon.exterior.coords)
+        else:
+            exterior_array = np.empty((0, 2))  # 空配列でフォールバック
+
+        # 地物の各頂点が図郭内に存在するか判定
+        isin_bool = NSP.get_bool_in_rectangle_area(
+            unit_min_x, unit_max_x, unit_min_y, unit_max_y, feature_array[:, 0], feature_array[:, 1])
+
+        # 地物が図郭の外に完全にあるかチェック（全てのx,yが境界外）
+        bool5 = np.all(feature_array[:, 0] < unit_min_x)  # 左側
+        bool6 = np.all(unit_max_x < feature_array[:, 0])  # 右側
+        bool7 = np.all(feature_array[:, 1] < unit_min_y)  # 下側
+        bool8 = np.all(unit_max_y < feature_array[:, 1])  # 上側
+
+        # 全頂点が図郭内にあれば True
+        if np.all(isin_bool):
+            return True
+
+        elif np.any([bool5, bool6, bool7, bool8]):
+            return False
+
+        else:
+
+            # 外周から外接矩形を生成し、図郭メッシュとの交差面積を算出
+            temp_unit_array = self.create_feature_rectangle_polygons(exterior_array, level_mesh_array)
+
+            temp_dict = {}
+
+            for i in range(len(temp_unit_array)):
+                coords = temp_unit_array[i]
+
+                # 各矩形の左上座標をキーとして使用
+                min_x = int(np.min(coords[:, 0]))
+                max_y = int(np.max(coords[:, 1]))
+                key = (min_x, max_y)
+
+                oriented_exterior_array = self.transform_polygon_orientation(exterior_array, direction=1)
+                oriented_temp_unit_array = self.transform_polygon_orientation(temp_unit_array[i], direction=1)
+
+                # 外周を矩形でクリップ
+                value = self.clip_polygon(oriented_exterior_array, oriented_temp_unit_array, clip_ccw=1)
+
+                # 面積が存在しなければ次の矩形へ
+                if value is  None or value.size == 0:
+
+                    continue
+
+                # クリップ後の面積計算
+                area = self.calculate_polygon_area(value)
+                temp_dict[key] = area
+
+            # 原点図郭と面積最大値を比較し、含まれるか判定
+            if origin_point in temp_dict:
+                max_area = max(temp_dict.values())
+                origin_area = temp_dict[origin_point]
+
+                if origin_area >= max_area:
+                    return True
+
+                else:
+                    return False
+
+            else:
+                return False
+
+
     def transform(self, context, flowfile):
 
         try:
-            data_definition_delimiter, center_dwh_name, gml_id_dwh_name, feature_tag_string, level2500_unit_code_string, output_target_crs_string = \
+
+            linestring_id_array = None
+
+            # flowfileの属性からfilenameを取得(writestrに渡すため)
+            filename = flowfile.getAttribute("filename")
+
+            data_definition_delimiter, center_dwh_name, gml_id_dwh_name, feature_tag_string, level2500_unit_code_string, output_target_crs_string, output_zip_flag = \
                 WM.calc_func_time(self.logger)(
                     self.get_property)(context, flowfile)
 
@@ -704,12 +1147,29 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
     # -----------------------------------------------------------------------------------------------------------
             coordinates_id_array, coordinates_dict = WM.calc_func_time(self.logger)(
                 self.create_coordinates_id_array_and_dict_from_coordinates_array)(field_set_file_data_frame, geometry_dwh_file_name_list)
-    # -----------------------------------------------------------------------------------------------------------
-    # 【取得】中心線npy取得
-    # -----------------------------------------------------------------------------------------------------------
-            linestring_id_array, linestring_dict = WM.calc_func_time(self.logger)(
-                self.create_linestring_dict_from_field_set_file_data_frame)(field_set_file_data_frame, center_dwh_name)
-    # -----------------------------------------------------------------------------------------------------------
+
+            if center_dwh_name is None or center_dwh_name == "":
+
+                # field_set_file_data_frame からジオメトリ値の配列を抽出
+                geometry_value_coordinates_array = pickle.loads(base64.b64decode(
+                    field_set_file_data_frame.loc[field_set_file_data_frame["Dwh"] == geometry_dwh_file_name_list[0], "Value"].values[0]))
+
+                temp_coordinates_id_array = np.unique(geometry_value_coordinates_array[:,0])
+
+                # IDごとの構成点座標取得（キー：地物ID、値：地物IDの構成点のxyz座標）
+                temp_coordinate_dict = {
+                    temp_coordinates_id_array[i]: geometry_value_coordinates_array[
+                        list(np.where(geometry_value_coordinates_array[:, 0] == temp_coordinates_id_array[i])[0]), 1:4
+                    ] for i in range(len(temp_coordinates_id_array))
+                }
+
+            else:
+        # -----------------------------------------------------------------------------------------------------------
+        # 【取得】中心線npy取得
+        # -----------------------------------------------------------------------------------------------------------
+                linestring_id_array, linestring_dict = WM.calc_func_time(self.logger)(
+                    self.create_linestring_dict_from_field_set_file_data_frame)(field_set_file_data_frame, center_dwh_name)
+        # -----------------------------------------------------------------------------------------------------------
 
     # -----------------------------------------------------------------------------------------------------------
     # 【取得】データ定義ファイルに指定された属性項目ファイルをすべて読み込み一つのDataFrameとする
@@ -761,8 +1221,13 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
                 # -----------------------------------------------------------------------------------------------------------
                 # 【抽出】ジオメトリ指定図郭内に存在するかチェック
                 # -----------------------------------------------------------------------------------------------------------
-                feature_bool = [WM.calc_func_time(self.logger)(NSP.judge_citygml)(
-                    linestring_dict[linestring_id_array[i]][:, :2], unit_origin_array, level_mesh_array) for i in range(len(linestring_id_array))]
+                if center_dwh_name is None or center_dwh_name == "":
+                    feature_bool = [self.judge_citygml_multipatch(
+                        temp_coordinate_dict[temp_coordinates_id_array[i]][:, 0:2], unit_origin_array, level_mesh_array) for i in range(len(temp_coordinates_id_array))]
+
+                else:
+                    feature_bool = [WM.calc_func_time(self.logger)(NSP.judge_citygml)(
+                        linestring_dict[linestring_id_array[i]][:, :2], unit_origin_array, level_mesh_array) for i in range(len(linestring_id_array))]
 
                 # 出力対象がなければ次へ
                 if np.any(feature_bool) == True:
@@ -773,7 +1238,7 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
                 # 出力対象抽出
                 target_attribute_dataframe, target_id_array, target_coordinates_array, target_gml_id_array\
                     = WM.calc_func_time(self.logger)(self.output_target_extraction_specifically_feature_bool)(all_attribute_dataframe,
-                                                                                                              linestring_id_array,
+                                                                                                              coordinates_id_array if center_dwh_name is None or center_dwh_name == "" else linestring_id_array,
                                                                                                               coordinates_dict,
                                                                                                               gml_id_array,
                                                                                                               feature_bool
@@ -849,126 +1314,52 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
                     # 属性追加 これの内側にジオメトリ追加
                     # -----------------------------------------------------------------------------------------------------------
                     for all_attribute_name_list_index in range(len(all_attribute_name_list)):
-
+                        
+                        # タグと属性に分割
                         try:
                             attribute_split_list = [temp.split(
                                 DDC.XML_ATTRIBUTE_DELIMITER_FOR_LINESTRING) for temp in all_attribute_name_list[all_attribute_name_list_index]]
+
+                            # XML属性名とXML属性値をキーとする
+                            key_list=["-".join(attribute_split) for attribute_split in attribute_split_list]
+                            key_bool= np.array([key in element_dict for key in key_list], dtype=np.bool_)
+                        
                         except Exception:
                             self.logger.error(traceback.format_exc())
                             return FlowFileTransformResult(relationship="failure")
-
-                        if len(attribute_split_list) == 1:
+                        
+                        # 最初のタグが設定されていない場合
+                        if np.all(key_bool==False) or (key_bool[0] == False):
 
                             # 中でタグに属性追加するか判定
-                            attribute_element = WM.calc_func_time(self.logger)(self.decide_to_add_attribute_to_tag)(
-                                attribute_split_list, output_element_tree, attribute_array_list, all_attribute_name_list_index, index)
-
-                            # '|'でsplitした結果複数の要素が存在する場合2つ目以降の要素は属性として登録する
-                            # 文字列は'='でsplitして最初の要素を属性名、属性値とする
-                            # 追加タグの要素数チェック 属性が入っているなら追加
-                            if len(attribute_split_list[0]) > 1:
-                                try:
-                                    # 1つ目以降の要素
-                                    value_list = attribute_split_list[0][1:]
-
-                                    # '='でsplitして属性名と属性値に分ける
-                                    value_split_list = [value_list[spi].split(
-                                        DDC.XML_ATTRIBUTE_VALUE_DELIMITER) for spi in range(len(value_list))]
-                                    # 追加
-                                    [attribute_element.set(value_split_list[vi][0], value_split_list[vi][1]) for vi in range(
-                                        len(value_split_list))]
-
-                                except Exception:
-                                    self.logger.error(traceback.format_exc())
-                                    return FlowFileTransformResult(relationship="failure")
-
-                            else:
-                                pass
-
-                            try:
-                                # 追加対象タグ名
-                                add_target_tag_name = attribute_split_list[0][0]
-
-                            except Exception:
-                                self.logger.error(traceback.format_exc())
-                                return FlowFileTransformResult(relationship="failure")
-
-                        # 2回以上同じクラスが出てくる場合
-                        elif attribute_split_list[-2][0] in element_dict:
-
-                            already_element_tree = WM.calc_func_time(self.logger)(self.append_attribute_to_tag)(element_dict,
-                                                                                                                attribute_split_list,
-                                                                                                                attribute_array_list,
-                                                                                                                all_attribute_name_list_index,
-                                                                                                                index)
-
-                            # 追加タグの要素数チェック 属性が入っているなら追加
-                            if len(attribute_split_list[-1]) > 1:
-                                try:
-                                    # 1つ目以降の要素
-                                    value_list = attribute_split_list[-1][1:]
-
-                                    # '='でsplitして属性名と属性値に分ける
-                                    value_split_list = [value_list[spi].split(
-                                        DDC.XML_ATTRIBUTE_VALUE_DELIMITER) for spi in range(len(value_list))]
-
-                                    # 追加
-                                    [already_element_tree.set(
-                                        value_split_list[vi][0], value_split_list[vi][1]) for vi in range(len(value_split_list))]
-
-                                except Exception:
-                                    self.logger.error(traceback.format_exc())
-                                    return FlowFileTransformResult(relationship="failure")
-
-                            else:
-                                pass
-                            try:
-                                # 追加対象タグ名
-                                add_target_tag_name = attribute_split_list[-1][0]
-
-                            except Exception:
-                                self.logger.error(traceback.format_exc())
-                                return FlowFileTransformResult(relationship="failure")
-
+                            attribute_element\
+                                =WM.calc_func_time(self.logger)\
+                                                  (self.add_attribute_to_tag_in_element_dict)\
+                                                  (attribute_split_list,
+                                                   attribute_array_list,
+                                                   all_attribute_name_list_index,
+                                                   index,
+                                                   element_dict,
+                                                   output_element_tree)
+                                                  
                         # 要素2個以上で初めて出てくる場合
                         else:
-                            attribute_subelement = WM.calc_func_time(self.logger)(self.add_attribute_to_tag_in_element_dict)(attribute_split_list,
-                                                                                                                             attribute_array_list,
-                                                                                                                             all_attribute_name_list_index,
-                                                                                                                             index,
-                                                                                                                             element_dict,
-                                                                                                                             output_element_tree
-                                                                                                                             )
+                            already_element_tree\
+                                =WM.calc_func_time(self.logger)\
+                                                  (self.append_attribute_to_tag)\
+                                                  (element_dict,
+                                                   attribute_split_list,
+                                                   attribute_array_list,
+                                                   all_attribute_name_list_index,
+                                                   index,
+                                                   key_bool)
 
-                            # 追加タグの要素数チェック 属性が入っているなら追加
-                            if len(attribute_split_list[-1]) > 1:
-                                try:
-                                    # 1つ目以降の要素
-                                    value_list = attribute_split_list[-1][1:]
-
-                                    # '='でsplitして属性名と属性値に分ける
-                                    value_split_list = [value_list[spi].split(
-                                        DDC.XML_ATTRIBUTE_VALUE_DELIMITER) for spi in range(len(value_list))]
-
-                                    # 追加
-                                    [attribute_subelement.set(
-                                        value_split_list[vi][0], value_split_list[vi][1]) for vi in range(len(value_split_list))]
-
-                                except Exception:
-                                    self.logger.error(traceback.format_exc())
-                                    return FlowFileTransformResult(relationship="failure")
-
-                            else:
-                                pass
-                            # 追加対象タグ名
-                            add_target_tag_name = attribute_split_list[-1][0]
-
-                        # 特定の属性値を追加した後ジオメトリ追加
                         # -----------------------------------------------------------------------------------------------------------
                         # 地物のsubelementに対してマルチパッチの座標設定
                         # -----------------------------------------------------------------------------------------------------------
+
                         # 地物のsubelementに対してマルチパッチの数だけ追加
-                        if add_target_tag_name == 'frn:function':
+                        if attribute_split_list[-1][0] == 'frn:function':
 
                             feature_element, feature_subelement, element_dict = attribute_subelement = WM.calc_func_time(
                                 self.logger)(NSP.create_element)(feature_string_list, element_dict)
@@ -1009,6 +1400,16 @@ class ConvertLineStringCoordinatesToCityGMLNoThematic(FlowFileTransform):
 
             output_field_set_file = WM.calc_func_time(self.logger)(
                 PBP.set_field_set_file)(dwh_list, type_list, xml_value_list)
+
+            if output_zip_flag == ZIP_COMPRESSION_ENABLED:
+
+                # CSV形式の文字列をZIP圧縮
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as zip_file:
+                    zip_file.writestr(filename, output_field_set_file)
+
+                # ZIPデータを取得
+                output_field_set_file = zip_buffer.getvalue()
 
             return FlowFileTransformResult(relationship="success",
                                            contents=output_field_set_file)

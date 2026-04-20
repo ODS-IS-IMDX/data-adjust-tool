@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,16 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Python標準ライブラリ
 import os
-from importlib import import_module
-
-# 外部ライブラリの動的インポート
-ezdxf = import_module("ezdxf")
+import ezdxf
 
 from cad.common.cad_base_validate_processor import CadBaseValidateProcessor
 from common.error_code_list import ErrorCodeList
-
 
 class ValidateConvertFromDxfToGeoDataFrame(CadBaseValidateProcessor):
     class Java:

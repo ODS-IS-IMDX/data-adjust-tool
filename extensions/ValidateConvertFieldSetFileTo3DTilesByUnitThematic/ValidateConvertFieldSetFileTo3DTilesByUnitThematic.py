@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -70,7 +71,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
         name="Data Definition Encoding",
         description="データ定義ファイルの文字コード",
         default_value="shift-jis",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -103,7 +104,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
         description="x座標の大きさ",
         default_value="0",
         required=True,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False
     )
 
@@ -113,7 +114,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
         description="y座標の大きさ",
         default_value="0",
         required=True,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False
     )
 
@@ -127,7 +128,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
         name="JUDGE COORDINATES DISTRIBUTION NAME",
         description="図郭の内包判定用座標取得用流通項目名",
         default_value="thematic",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -175,7 +176,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
 
             try:
                 # 入力元CRSをプロパティから取得
-                input_crs = int(context.getProperty(self.INPUT_CRS).getValue())
+                input_crs = int(context.getProperty(self.INPUT_CRS).evaluateAttributeExpressions(flowfile).getValue())
             except Exception:
                 args = {"error_code": ErrorCodeList.ED00025,
                         "対象プロパティ": "Input CRS"}
@@ -193,7 +194,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
             try:
                 # パラメータ計算用CRSをプロパティから取得
                 parameter_crs = int(context.getProperty(
-                    self.PARAMETER_CRS).getValue())
+                    self.PARAMETER_CRS).evaluateAttributeExpressions(flowfile).getValue())
             except Exception:
                 args = {"error_code": ErrorCodeList.ED00025,
                         "対象プロパティ": "Parameter CRS"}
@@ -210,7 +211,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
 
             try:
                 # x座標の単位をプロパティから取得
-                x_unit = float(context.getProperty(self.X_UNIT).getValue())
+                x_unit = float(context.getProperty(self.X_UNIT).evaluateAttributeExpressions(flowfile).getValue())
             except Exception:
                 args = {"error_code": ErrorCodeList.ED00026,
                         "対象プロパティ": "X UNIT"}
@@ -224,7 +225,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
 
             try:
                 # y座標の単位をプロパティから取得
-                y_unit = float(context.getProperty(self.Y_UNIT).getValue())
+                y_unit = float(context.getProperty(self.Y_UNIT).evaluateAttributeExpressions(flowfile).getValue())
             except Exception:
                 args = {"error_code": ErrorCodeList.ED00026,
                         "対象プロパティ": "Y UNIT"}
@@ -238,7 +239,7 @@ class ValidateConvertFieldSetFileTo3DTilesByUnitThematic(DataProcessingBaseValid
 
             # 内包、交差判定用座標取得用流通項目名
             judge_coordinates_distribution_name\
-                = context.getProperty(self.JUDGE_COORDINATES_DISTRIBUTION_NAME).getValue()
+                = context.getProperty(self.JUDGE_COORDINATES_DISTRIBUTION_NAME).evaluateAttributeExpressions(flowfile).getValue()
 
             attribute_dict = flowfile.getAttributes()
             # 値を追加するためのリスト

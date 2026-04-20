@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +87,7 @@ class ConvertFromDxfToGeoDataFrame(BaseProcessor):
         description = '指定したCADの座標単位を追加する。',
         allowable_values=['Meter', 'Millimeter', 'Degree', 'Second', 'Pixel', 'Dot', 'Inch'],
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required = True
     )
 

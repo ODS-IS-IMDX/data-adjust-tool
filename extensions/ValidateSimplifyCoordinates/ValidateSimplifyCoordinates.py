@@ -1,6 +1,6 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from importlib import import_module
-
-np = import_module("numpy")
-BaseGeometry = getattr(import_module("shapely.geometry.base"), "BaseGeometry")
-gpd = import_module("geopandas")
-
+import numpy as np
+from shapely.geometry.base import BaseGeometry
+import geopandas as gpd
 from cad.common import cad_utils as CU
 from cad.common.cad_base_validate_processor import CadBaseValidateProcessor
 from common.error_code_list import ErrorCodeList
@@ -37,7 +34,7 @@ class ValidateSimplifyCoordinates(CadBaseValidateProcessor):
         implements = ['org.apache.nifi.python.processor.FlowFileTransform']
 
     class ProcessorDetails:
-        version = '1.0.0'
+        version = "1.0.0"
         description = '''プロセッサー「SimplifyCoordinates」の入力データのチェックを行う'''
         tags = ['fieldsetfile', 'numpy', 'GeoNdarray', 'python', 'validate']
 

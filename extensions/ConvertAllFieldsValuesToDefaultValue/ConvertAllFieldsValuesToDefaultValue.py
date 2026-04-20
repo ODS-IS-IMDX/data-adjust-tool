@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +61,7 @@ class ConvertAllFieldsValuesToDefaultValue(FlowFileTransform):
         name="Replacement Word",
         description="置換後の文字",
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True
     )
 
@@ -71,7 +72,7 @@ class ConvertAllFieldsValuesToDefaultValue(FlowFileTransform):
         required=True,
         allowable_values=[INT, FLOAT, STR],
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
     )
 
     # 新しいDWHファイル名をプロパティで入力。
@@ -106,11 +107,11 @@ class ConvertAllFieldsValuesToDefaultValue(FlowFileTransform):
             output_dwh_name: 出力データのDWH
         """
         # プロパティから既定値を取得
-        default_value = context.getProperty(self.DEFAULT_VALUE).getValue()
+        default_value = context.getProperty(self.DEFAULT_VALUE).evaluateAttributeExpressions(flowfile).getValue()
 
         # 既定値の型
         default_value_type = context.getProperty(
-            self.DEFAULT_VALUE_TYPE).getValue()
+            self.DEFAULT_VALUE_TYPE).evaluateAttributeExpressions(flowfile).getValue()
 
         # output用のDWH名をプロパティの値から取得
         output_dwh_name = context.getProperty(

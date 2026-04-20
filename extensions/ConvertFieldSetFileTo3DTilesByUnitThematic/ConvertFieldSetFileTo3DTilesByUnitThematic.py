@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +83,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
         name="Data Definition Encoding",
         description="データ定義ファイルの文字コード",
         default_value="shift-jis",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -115,7 +116,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
         description="x座標の大きさ",
         default_value="0",
         required=True,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False
     )
 
@@ -125,7 +126,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
         description="y座標の大きさ",
         default_value="0",
         required=True,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         sensitive=False
     )
 
@@ -139,7 +140,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
         name="JUDGE COORDINATES DISTRIBUTION NAME",
         description="図郭の内包判定用座標取得用流通項目名",
         default_value="thematic",
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True,
         sensitive=False
     )
@@ -151,7 +152,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
         default_value="data",
         required=True,
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES
     )
 
     # ZIP圧縮するかどうかのフラグ（圧縮するまたは圧縮しない）デフォルトは"圧縮しない"
@@ -162,7 +163,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
         allowable_values=[ZIP_COMPRESSION_ENABLED, ZIP_COMPRESSION_DISABLED],
         required=True,
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES
     )
 
     property_descriptors = [DATA_DEFINITION_DELIMITER,
@@ -196,39 +197,39 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
             # ---------------------------------------------------------------------------
             # データ定義ファイルの区切り文字
             data_definition_delimiter\
-                = context.getProperty(self.DATA_DEFINITION_DELIMITER).getValue()
+                = context.getProperty(self.DATA_DEFINITION_DELIMITER).evaluateAttributeExpressions(flowfile).getValue()
 
             # データ定義ファイルの文字コード
             data_definition_encoding\
-                = context.getProperty(self.DATA_DEFINITION_ENCODING).getValue()
+                = context.getProperty(self.DATA_DEFINITION_ENCODING).evaluateAttributeExpressions(flowfile).getValue()
 
             # 入力元CRS
             input_crs\
-                = int(context.getProperty(self.INPUT_CRS).evaluateAttributeExpressions(flowfile).getValue())
+                = int(context.getProperty(self.INPUT_CRS).evaluateAttributeExpressions(flowfile).evaluateAttributeExpressions(flowfile).getValue())
 
             # パラメータ計算用CRS
             parameter_crs\
-                = int(context.getProperty(self.PARAMETER_CRS).evaluateAttributeExpressions(flowfile).getValue())
+                = int(context.getProperty(self.PARAMETER_CRS).evaluateAttributeExpressions(flowfile).evaluateAttributeExpressions(flowfile).getValue())
 
             # 出力単位図郭のx座標の大きさ
             x_unit\
-                = float(context.getProperty(self.X_UNIT).getValue())
+                = float(context.getProperty(self.X_UNIT).evaluateAttributeExpressions(flowfile).getValue())
 
             # 出力単位図郭のy座標の大きさ
             y_unit\
-                = float(context.getProperty(self.Y_UNIT).getValue())
+                = float(context.getProperty(self.Y_UNIT).evaluateAttributeExpressions(flowfile).getValue())
 
             # 内包、交差判定用座標取得用流通項目名
             judge_coordinates_distribution_name\
-                = context.getProperty(self.JUDGE_COORDINATES_DISTRIBUTION_NAME).getValue()
+                = context.getProperty(self.JUDGE_COORDINATES_DISTRIBUTION_NAME).evaluateAttributeExpressions(flowfile).getValue()
 
             # JSONが参照するglTFを格納するディレクトリのパス
             gltf_directory_path\
-                = context.getProperty(self.GLTF_DIRECTORY_PATH).getValue()
+                = context.getProperty(self.GLTF_DIRECTORY_PATH).evaluateAttributeExpressions(flowfile).getValue()
 
             # ZIP圧縮するかどうかのフラグ
             output_zip_flag\
-                = context.getProperty(self.OUTPUT_ZIP_FLAG).evaluateAttributeExpressions(flowfile).getValue()
+                = context.getProperty(self.OUTPUT_ZIP_FLAG).evaluateAttributeExpressions(flowfile).evaluateAttributeExpressions(flowfile).getValue()
 
             # ---------------------------------------------------------------------------
 
@@ -563,7 +564,7 @@ class ConvertFieldSetFileTo3DTilesByUnitThematic(FlowFileTransform):
                     zip_file.writestr(filename, output_field_set_file)
 
                 # ZIPデータを取得
-                output_field_set_file = zip_buffer.getvalue()
+                output_field_set_file = zip_buffer.evaluateAttributeExpressions(flowfile).getvalue()
 
             return FlowFileTransformResult(relationship="success", contents=output_field_set_file)
 

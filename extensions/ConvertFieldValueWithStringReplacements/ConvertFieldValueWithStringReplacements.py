@@ -1,6 +1,7 @@
 # MIT License
 # 
-# Copyright (c) 2025 NTT InfraNet
+# Copyright (c) 2025,2026 NTT InfraNet
+# Copyright (c) 2026 NTT DATA Japan Co., Ltd.
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +64,7 @@ class ConvertFieldValueWithStringReplacements(FlowFileTransform):
         description="カンマ区切りで、置換前の文字列と置換後の文字列を入力したCSV",
         default_value="before_string,after_string",
         sensitive=False,
-        expression_language_scope=ExpressionLanguageScope.NONE,
+        expression_language_scope=ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
         required=True
     )
 
@@ -102,7 +103,7 @@ class ConvertFieldValueWithStringReplacements(FlowFileTransform):
         # replacement_definition_csvプロパティの値を取得
         # プロパティにCSV形式で直接記入する
         replacement_definition_csv = \
-            context.getProperty(self.REPLACEMENT_DEFINITION_CSV).getValue()
+            context.getProperty(self.REPLACEMENT_DEFINITION_CSV).evaluateAttributeExpressions(flowfile).getValue()
 
         # output用のDWH名をプロパティの値から取得
         output_dwh_name \
